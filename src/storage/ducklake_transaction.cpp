@@ -56,6 +56,8 @@ void DuckLakeTransaction::Commit() {
 		connection->Commit();
 	}
 	connection.reset();
+
+	table_data_changes.clear();
 }
 
 void DuckLakeTransaction::Rollback() {
@@ -65,6 +67,8 @@ void DuckLakeTransaction::Rollback() {
 		connection.reset();
 	}
 	CleanupFiles();
+
+	table_data_changes.clear();
 }
 
 Connection &DuckLakeTransaction::GetConnection() {

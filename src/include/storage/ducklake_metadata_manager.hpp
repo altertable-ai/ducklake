@@ -101,6 +101,8 @@ public:
 
 	virtual bool TypeIsNativelySupported(const LogicalType &type);
 
+	virtual string GetColumnTypeInternal(const LogicalType &column_type);
+
 	DuckLakeMetadataManager &Get(DuckLakeTransaction &transaction);
 
 	//! Initialize a new DuckLake
@@ -124,7 +126,8 @@ public:
 	                         const FilterPushdownInfo *filter_info = nullptr);
 	virtual vector<DuckLakeCompactionFileEntry> GetFilesForCompaction(DuckLakeTableEntry &table, CompactionType type,
 	                                                                  double deletion_threshold,
-	                                                                  DuckLakeSnapshot snapshot);
+	                                                                  DuckLakeSnapshot snapshot,
+	                                                                  DuckLakeFileSizeOptions options);
 	virtual idx_t GetCatalogIdForSchema(idx_t schema_id);
 	virtual vector<DuckLakeFileForCleanup> GetOldFilesForCleanup(const string &filter);
 	virtual vector<DuckLakeFileForCleanup> GetOrphanFilesForCleanup(const string &filter, const string &separator);
