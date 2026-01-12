@@ -1318,6 +1318,13 @@ string DuckLakeTransaction::CommitChanges(DuckLakeCommitState &commit_state,
 		                                                     new_tables_result, new_schemas_result);
 		batch_queries += metadata_manager->WriteCompactions(compaction_rewrite_delete_changes.compacted_files,
 		                                                    CompactionType::REWRITE_DELETES);
+
+		auto compaction_rewrite_schema_changes =
+		    GetCompactionChanges(commit_snapshot, CompactionType::REWRITE_TO_CURRENT_SCHEMA);
+		batch_queries += metadata_manager->WriteCompactions(compaction_rewrite_schema_changes.compacted_files,
+		                                                    CompactionType::REWRITE_TO_CURRENT_SCHEMA);
+		batch_queries += metadata_manager->WriteNewDataFiles(compaction_rewrite_schema_changes.new_files,
+		                                                     new_tables_result, new_schemas_result);
 	}
 	return batch_queries;
 }
@@ -1340,6 +1347,10 @@ CompactionInformation DuckLakeTransaction::GetCompactionChanges(DuckLakeSnapshot
 			case CompactionType::MERGE_ADJACENT_TABLES:
 				new_file.begin_snapshot = compaction.source_files[0].file.begin_snapshot;
 				break;
+			case CompactionType::REWRITE_TO_CURRENT_SCHEMA:
+				// For REWRITE_TO_CURRENT_SCHEMA, the new file is visible only from the commit snapshot onward
+				// begin_snapshot is left unset here so it defaults to {SNAPSHOT_ID} in WriteNewDataFiles
+				break;
 			default:
 				throw InternalException("DuckLakeTransaction::GetCompactionChanges Compaction type is invalid");
 			}
@@ -1351,8 +1362,8 @@ CompactionInformation DuckLakeTransaction::GetCompactionChanges(DuckLakeSnapshot
 				if (!compacted_file.delete_files.empty()) {
 					row_id_limit -= compacted_file.delete_files.back().row_count;
 				}
-				// For REWRITE_DELETES, do NOT carry forward partial_file_info from source files.
-				// The rewritten file's begin_snapshot is set to the delete snapshot, so time travel
+				// For REWRITE_DELETES and REWRITE_TO_CURRENT_SCHEMA, do NOT carry forward partial_file_info from source files.
+				// The rewritten file's begin_snapshot is set accordingly, so time travel
 				// to earlier snapshots will read from the original file (which retains its partial_file_info).
 				if (type == CompactionType::MERGE_ADJACENT_TABLES) {
 					if (!compacted_file.partial_files.empty()) {

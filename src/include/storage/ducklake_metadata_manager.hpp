@@ -168,6 +168,7 @@ public:
 	virtual string WriteNewColumnMappings(const vector<DuckLakeColumnMappingInfo> &new_column_mappings);
 	virtual string WriteMergeAdjacent(const vector<DuckLakeCompactedFileInfo> &compactions);
 	virtual string WriteDeleteRewrites(const vector<DuckLakeCompactedFileInfo> &compactions);
+	virtual string WriteRewriteToCurrentSchema(const vector<DuckLakeCompactedFileInfo> &compactions);
 	virtual string WriteCompactions(const vector<DuckLakeCompactedFileInfo> &compactions, CompactionType type);
 	virtual string InsertSnapshot();
 	virtual string WriteSnapshotChanges(const SnapshotChangeInfo &change_info,

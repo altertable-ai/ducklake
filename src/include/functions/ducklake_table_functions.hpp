@@ -75,6 +75,11 @@ public:
 	static TableFunctionSet GetFunctions();
 };
 
+class DuckLakeRewriteToCurrentSchemaFunction : public TableFunction {
+public:
+	static TableFunctionSet GetFunctions();
+};
+
 class DuckLakeCleanupOldFilesFunction : public TableFunction {
 public:
 	DuckLakeCleanupOldFilesFunction();

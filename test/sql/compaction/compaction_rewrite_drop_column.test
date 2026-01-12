@@ -1,0 +1,109 @@
+# name: test/sql/compaction/compaction_rewrite_drop_column.test
+# description: test that rewrite_to_current_schema preserves dropped column data for time travel
+# group: [compaction]
+
+require ducklake
+
+require parquet
+
+test-env DUCKLAKE_CONNECTION __TEST_DIR__/{UUID}.db
+
+test-env DATA_PATH __TEST_DIR__
+
+statement ok
+ATTACH 'ducklake:${DUCKLAKE_CONNECTION}' AS ducklake (DATA_PATH '${DATA_PATH}/ducklake_drop_col')
+
+# snapshot 1
+statement ok
+CREATE TABLE ducklake.test(id INTEGER, keep_col INTEGER, drop_col INTEGER);
+
+# snapshot 2 - insert data with all columns
+statement ok
+INSERT INTO ducklake.test VALUES (1, 100, 1000);
+
+# snapshot 3 - second file
+statement ok
+INSERT INTO ducklake.test VALUES (2, 200, 2000);
+
+# snapshot 4 - drop a column
+statement ok
+ALTER TABLE ducklake.test DROP COLUMN drop_col;
+
+# snapshot 5 - insert more data (without the dropped column)
+statement ok
+INSERT INTO ducklake.test VALUES (3, 300);
+
+# snapshot 6 - fourth file
+statement ok
+INSERT INTO ducklake.test VALUES (4, 400);
+
+# verify current state (no drop_col)
+query II
+SELECT * FROM ducklake.test ORDER BY id
+----
+1	100
+2	200
+3	300
+4	400
+
+# verify time travel BEFORE rewrite - can still see drop_col (snapshot 3, before DROP)
+query III
+SELECT * FROM ducklake.test AT (VERSION => 3) ORDER BY id
+----
+1	100	1000
+2	200	2000
+
+# 4 files before rewrite
+query I
+SELECT COUNT(*) FROM ducklake_list_files('ducklake', 'test');
+----
+4
+
+# run rewrite_to_current_schema
+statement ok
+CALL ducklake_rewrite_to_current_schema('ducklake', 'test');
+
+# should be 1 visible file now
+query I
+SELECT COUNT(*) FROM ducklake_list_files('ducklake', 'test');
+----
+1
+
+# current state still works
+query II
+SELECT * FROM ducklake.test ORDER BY id
+----
+1	100
+2	200
+3	300
+4	400
+
+# time travel STILL works - old files preserved, can still see drop_col!
+query III
+SELECT * FROM ducklake.test AT (VERSION => 3) ORDER BY id
+----
+1	100	1000
+2	200	2000
+
+# now expire snapshots and cleanup
+statement ok
+CALL ducklake_expire_snapshots('ducklake', older_than => NOW()::TIMESTAMP + INTERVAL '1 day');
+
+statement ok
+CALL ducklake_cleanup_old_files('ducklake', cleanup_all => true);
+
+# current state still works after cleanup
+query II
+SELECT * FROM ducklake.test ORDER BY id
+----
+1	100
+2	200
+3	300
+4	400
+
+# time travel to old snapshot no longer works (snapshot expired)
+statement error
+SELECT * FROM ducklake.test AT (VERSION => 3) ORDER BY id
+----
+No snapshot found at version 3
+

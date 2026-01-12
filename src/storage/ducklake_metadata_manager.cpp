@@ -1321,9 +1321,9 @@ vector<DuckLakeCompactionFileEntry> DuckLakeMetadataManager::GetFilesForCompacti
 		deletion_threshold_clause = StringUtil::Format(
 		    " AND del.delete_count/data.record_count >= %f and data.end_snapshot is null", deletion_threshold);
 	}
-	// Add file size filtering for MERGE_ADJACENT_TABLES compaction
+	// Add file size filtering for MERGE_ADJACENT_TABLES and REWRITE_TO_CURRENT_SCHEMA compaction
 	string file_size_filter_clause;
-	if (type == CompactionType::MERGE_ADJACENT_TABLES) {
+	if (type == CompactionType::MERGE_ADJACENT_TABLES || type == CompactionType::REWRITE_TO_CURRENT_SCHEMA) {
 		if (options.min_file_size.IsValid()) {
 			file_size_filter_clause +=
 			    StringUtil::Format(" AND data.file_size_bytes >= %llu", options.min_file_size.GetIndex());
@@ -3000,6 +3000,27 @@ string DuckLakeMetadataManager::WriteDeleteRewrites(const vector<DuckLakeCompact
 	return batch_query;
 }
 
+string DuckLakeMetadataManager::WriteRewriteToCurrentSchema(const vector<DuckLakeCompactedFileInfo> &compactions) {
+	if (compactions.empty()) {
+		return {};
+	}
+	string batch_query;
+	// For REWRITE_TO_CURRENT_SCHEMA:
+	// - End the old files at the commit snapshot (so time travel still works)
+	// - The new file's begin_snapshot is set to the commit snapshot
+	// - Do NOT delete old metadata rows and do NOT schedule old files for deletion
+	for (auto &compaction : compactions) {
+		D_ASSERT(!compaction.path.empty());
+		// Update the old file to set end_snapshot
+		batch_query += StringUtil::Format(R"(
+UPDATE {METADATA_CATALOG}.ducklake_data_file SET end_snapshot = {SNAPSHOT_ID}
+WHERE data_file_id = %llu;
+)",
+		                                  compaction.source_id.index);
+	}
+	return batch_query;
+}
+
 string DuckLakeMetadataManager::WriteCompactions(const vector<DuckLakeCompactedFileInfo> &compactions,
                                                  CompactionType type) {
 	switch (type) {
@@ -3007,6 +3028,8 @@ string DuckLakeMetadataManager::WriteCompactions(const vector<DuckLakeCompactedF
 		return WriteMergeAdjacent(compactions);
 	case CompactionType::REWRITE_DELETES:
 		return WriteDeleteRewrites(compactions);
+	case CompactionType::REWRITE_TO_CURRENT_SCHEMA:
+		return WriteRewriteToCurrentSchema(compactions);
 	default:
 		throw InternalException("DuckLakeMetadataManager::WriteCompactions: CompactionType is not accepted");
 	}
