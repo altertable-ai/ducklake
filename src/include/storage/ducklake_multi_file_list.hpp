@@ -71,6 +71,8 @@ private:
 	//! The set of files to read
 	vector<DuckLakeFileListEntry> files;
 	bool read_file_list;
+	//! Whether this list was created by ComplexFilterPushdown (pruned list that should preserve files)
+	bool is_complex_filter_pruned_list = false;
 	//! The set of transaction-local files
 	vector<DuckLakeDataFile> transaction_local_files;
 	//! Inlined transaction-local data

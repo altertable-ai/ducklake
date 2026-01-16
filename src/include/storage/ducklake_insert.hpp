@@ -35,6 +35,8 @@ public:
 	vector<DuckLakeDataFile> written_files;
 	idx_t total_insert_count;
 	case_insensitive_set_t not_null_fields;
+	//! JSON stats accumulated from pass-through data (column name -> stats)
+	unordered_map<string, DuckLakeColumnJsonKeyStats> pass_through_json_stats;
 };
 
 class DuckLakeInsert : public PhysicalOperator {

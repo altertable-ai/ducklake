@@ -3,6 +3,7 @@
 #include "storage/ducklake_multi_file_list.hpp"
 #include "storage/ducklake_multi_file_reader.hpp"
 #include "storage/ducklake_metadata_manager.hpp"
+#include "storage/ducklake_stats.hpp"
 
 #include "duckdb/common/local_file_system.hpp"
 #include "duckdb/function/table_function.hpp"
@@ -19,6 +20,10 @@
 #include "duckdb/planner/filter/null_filter.hpp"
 #include "duckdb/planner/filter/optional_filter.hpp"
 #include "duckdb/planner/filter/in_filter.hpp"
+#include "duckdb/planner/expression/bound_comparison_expression.hpp"
+#include "duckdb/planner/expression/bound_constant_expression.hpp"
+#include "duckdb/planner/expression/bound_function_expression.hpp"
+#include "duckdb/planner/expression/bound_columnref_expression.hpp"
 #include "storage/ducklake_table_entry.hpp"
 
 namespace duckdb {
@@ -35,7 +40,7 @@ DuckLakeMultiFileList::DuckLakeMultiFileList(DuckLakeFunctionInfo &read_info,
 DuckLakeMultiFileList::DuckLakeMultiFileList(DuckLakeFunctionInfo &read_info,
                                              vector<DuckLakeFileListEntry> files_to_scan)
     : MultiFileList(vector<OpenFileInfo> {}, FileGlobOptions::ALLOW_EMPTY), read_info(read_info),
-      files(std::move(files_to_scan)), read_file_list(true) {
+      files(std::move(files_to_scan)), read_file_list(true), is_complex_filter_pruned_list(true) {
 }
 
 DuckLakeMultiFileList::DuckLakeMultiFileList(DuckLakeFunctionInfo &read_info,
@@ -49,11 +54,318 @@ DuckLakeMultiFileList::DuckLakeMultiFileList(DuckLakeFunctionInfo &read_info,
 	inlined_data_tables.push_back(inlined_table);
 }
 
+//! Information about a JSON extraction filter that can be used for pruning
+struct JsonExtractFilterInfo {
+	//! The field index of the JSON column
+	idx_t column_field_index;
+	//! The JSON key path being extracted (e.g., "a.b.c" from "$.a.b.c")
+	string json_key;
+	//! The comparison type
+	ExpressionType comparison_type;
+	//! The constant value being compared against
+	Value constant_value;
+	//! The type of the JSON column
+	LogicalType column_type;
+};
+
+//! Try to extract a flattened key path from a JSON path like "$.a.b.c"
+//! Returns the flattened path (e.g., "a.b.c") which matches how we store stats
+static bool TryExtractJsonPath(const string &path, string &out_key) {
+	// Must start with "$."
+	if (path.size() < 3 || path[0] != '$' || path[1] != '.') {
+		return false;
+	}
+
+	// Extract everything after "$." - this is the flattened key path
+	out_key = path.substr(2);
+
+	// Validate: must not be empty and must not contain brackets (array access not supported)
+	if (out_key.empty() || out_key.find('[') != string::npos) {
+		return false;
+	}
+
+	return true;
+}
+
+//! Try to extract a JsonExtractFilterInfo from a comparison expression
+static bool TryExtractJsonFilter(Expression &expr, const vector<string> &column_names,
+                                 const vector<column_t> &column_ids, const DuckLakeTableEntry &table,
+                                 JsonExtractFilterInfo &out_info) {
+	if (expr.type != ExpressionType::COMPARE_EQUAL && expr.type != ExpressionType::COMPARE_NOTEQUAL &&
+	    expr.type != ExpressionType::COMPARE_LESSTHAN && expr.type != ExpressionType::COMPARE_LESSTHANOREQUALTO &&
+	    expr.type != ExpressionType::COMPARE_GREATERTHAN && expr.type != ExpressionType::COMPARE_GREATERTHANOREQUALTO) {
+		return false;
+	}
+
+	auto &comparison = expr.Cast<BoundComparisonExpression>();
+	Expression *func_expr = nullptr;
+	Expression *const_expr = nullptr;
+	bool flip_comparison = false;
+
+	// Determine which side is the function and which is the constant
+	if (comparison.left->expression_class == ExpressionClass::BOUND_FUNCTION &&
+	    comparison.right->expression_class == ExpressionClass::BOUND_CONSTANT) {
+		func_expr = comparison.left.get();
+		const_expr = comparison.right.get();
+	} else if (comparison.right->expression_class == ExpressionClass::BOUND_FUNCTION &&
+	           comparison.left->expression_class == ExpressionClass::BOUND_CONSTANT) {
+		func_expr = comparison.right.get();
+		const_expr = comparison.left.get();
+		flip_comparison = true;
+	} else {
+		return false;
+	}
+
+	auto &func = func_expr->Cast<BoundFunctionExpression>();
+	auto &constant = const_expr->Cast<BoundConstantExpression>();
+
+	// Check if it's json_extract_string or json_extract
+	string func_name = StringUtil::Lower(func.function.name);
+	if (func_name != "json_extract_string" && func_name != "->>") {
+		return false;
+	}
+
+	// json_extract_string takes 2 arguments: (json_column, path)
+	if (func.children.size() != 2) {
+		return false;
+	}
+
+	// First argument should be a column reference
+	if (func.children[0]->expression_class != ExpressionClass::BOUND_COLUMN_REF) {
+		return false;
+	}
+
+	// Second argument should be a constant (the path)
+	if (func.children[1]->expression_class != ExpressionClass::BOUND_CONSTANT) {
+		return false;
+	}
+
+	auto &col_ref = func.children[0]->Cast<BoundColumnRefExpression>();
+	auto &path_const = func.children[1]->Cast<BoundConstantExpression>();
+
+	if (path_const.value.type().id() != LogicalTypeId::VARCHAR) {
+		return false;
+	}
+
+	string path = StringValue::Get(path_const.value);
+	string json_key;
+	if (!TryExtractJsonPath(path, json_key)) {
+		return false;
+	}
+
+	// Get the column index from the column binding
+	auto column_idx = col_ref.binding.column_index;
+	if (column_idx >= column_ids.size()) {
+		return false;
+	}
+
+	auto column_id = column_ids[column_idx];
+	if (IsVirtualColumn(column_id)) {
+		return false;
+	}
+
+	// Get the field index for this column
+	auto column_index = PhysicalIndex(column_id);
+	auto &root_id = table.GetFieldId(column_index);
+
+	// Verify it's a JSON column
+	if (!root_id.Type().IsJSONType()) {
+		return false;
+	}
+
+	out_info.column_field_index = root_id.GetFieldIndex().index;
+	out_info.json_key = json_key;
+	out_info.comparison_type = flip_comparison ? FlipComparisonExpression(expr.type) : expr.type;
+	out_info.constant_value = constant.value;
+	out_info.column_type = root_id.Type();
+
+	return true;
+}
+
+//! Check if a file can be pruned based on JSON key stats
+static bool CanPruneFileByJsonKeyStats(const DuckLakeFileListEntry &file_entry, const JsonExtractFilterInfo &filter) {
+	// Find the extra_stats for this column
+	auto extra_stats_it = file_entry.column_extra_stats.find(filter.column_field_index);
+	if (extra_stats_it == file_entry.column_extra_stats.end()) {
+		// No extra stats available - can't prune
+		return false;
+	}
+
+	// Parse the JSON key stats
+	DuckLakeColumnJsonKeyStats json_stats;
+	try {
+		json_stats.Deserialize(extra_stats_it->second);
+	} catch (...) {
+		// Failed to parse - can't prune
+		return false;
+	}
+
+	// Get stats for the specific key
+	auto key_stats = json_stats.GetKeyStats(filter.json_key);
+	if (!key_stats) {
+		// Key not found in any row of this file - all extractions will return NULL
+		// For equality/range comparisons with non-NULL constant, we can prune
+		if (!filter.constant_value.IsNull() && filter.comparison_type != ExpressionType::COMPARE_NOTEQUAL) {
+			return true;
+		}
+		return false;
+	}
+
+	// If the key has mixed types, we can't safely prune
+	if (key_stats->type == JsonKeyValueType::MIXED) {
+		return false;
+	}
+
+	// If all values for this key are NULL, we can prune for non-NULL comparisons
+	if (key_stats->value_count == 0 && key_stats->null_count > 0) {
+		if (!filter.constant_value.IsNull()) {
+			return true;
+		}
+		return false;
+	}
+
+	// Check if we can prune based on min/max
+	if (key_stats->min_value.empty() || key_stats->max_value.empty()) {
+		return false;
+	}
+
+	// Convert constant to string for comparison
+	string constant_str;
+	if (filter.constant_value.type().id() == LogicalTypeId::VARCHAR) {
+		constant_str = StringValue::Get(filter.constant_value);
+	} else {
+		constant_str = filter.constant_value.ToString();
+	}
+
+	// Perform the comparison based on the stored type
+	// Note: JSON key stats stores min/max as strings, and for VARCHAR comparison we use lexicographic ordering
+	auto compare = [&](const string &a, const string &b) -> int {
+		if (key_stats->type == JsonKeyValueType::DOUBLE || key_stats->type == JsonKeyValueType::BIGINT) {
+			try {
+				double val_a = std::stod(a);
+				double val_b = std::stod(b);
+				if (val_a < val_b) {
+					return -1;
+				}
+				if (val_a > val_b) {
+					return 1;
+				}
+				return 0;
+			} catch (...) {
+				// Fall back to string comparison
+			}
+		}
+		return a.compare(b);
+	};
+
+	int min_cmp = compare(key_stats->min_value, constant_str);
+	int max_cmp = compare(key_stats->max_value, constant_str);
+
+	switch (filter.comparison_type) {
+	case ExpressionType::COMPARE_EQUAL:
+		// Prune if constant is outside [min, max]
+		if (min_cmp > 0 || max_cmp < 0) {
+			return true;
+		}
+		break;
+	case ExpressionType::COMPARE_NOTEQUAL:
+		// Prune if all values equal the constant (min == max == constant)
+		if (min_cmp == 0 && max_cmp == 0 && key_stats->null_count == 0) {
+			return true;
+		}
+		break;
+	case ExpressionType::COMPARE_LESSTHAN:
+		// Prune if min >= constant
+		if (min_cmp >= 0) {
+			return true;
+		}
+		break;
+	case ExpressionType::COMPARE_LESSTHANOREQUALTO:
+		// Prune if min > constant
+		if (min_cmp > 0) {
+			return true;
+		}
+		break;
+	case ExpressionType::COMPARE_GREATERTHAN:
+		// Prune if max <= constant
+		if (max_cmp <= 0) {
+			return true;
+		}
+		break;
+	case ExpressionType::COMPARE_GREATERTHANOREQUALTO:
+		// Prune if max < constant
+		if (max_cmp < 0) {
+			return true;
+		}
+		break;
+	default:
+		break;
+	}
+
+	return false;
+}
+
 unique_ptr<MultiFileList> DuckLakeMultiFileList::ComplexFilterPushdown(ClientContext &context,
                                                                        const MultiFileOptions &options,
                                                                        MultiFilePushdownInfo &info,
                                                                        vector<unique_ptr<Expression>> &filters) {
-	return nullptr;
+	if (read_info.scan_type != DuckLakeScanType::SCAN_TABLE || filters.empty()) {
+		return nullptr;
+	}
+
+	// Extract JSON extraction filters from the filter expressions
+	vector<JsonExtractFilterInfo> json_filters;
+	for (auto &filter : filters) {
+		JsonExtractFilterInfo json_filter;
+		if (TryExtractJsonFilter(*filter, info.column_names, info.column_ids, read_info.table, json_filter)) {
+			json_filters.push_back(std::move(json_filter));
+		}
+	}
+
+	if (json_filters.empty()) {
+		return nullptr;
+	}
+
+	// Build filter pushdown info for the JSON columns so extra_stats gets loaded
+	auto pushdown_info = make_uniq<FilterPushdownInfo>();
+	for (auto &json_filter : json_filters) {
+		// Create a dummy table filter for this column to trigger extra_stats loading
+		auto dummy_filter = make_uniq<IsNotNullFilter>();
+		ColumnFilterInfo filter_info(json_filter.column_field_index, json_filter.column_type, std::move(dummy_filter));
+		if (pushdown_info->column_filters.find(json_filter.column_field_index) == pushdown_info->column_filters.end()) {
+			pushdown_info->column_filters.emplace(json_filter.column_field_index, std::move(filter_info));
+		}
+	}
+
+	// Create a new multi-file list with the filter info
+	auto result = make_uniq<DuckLakeMultiFileList>(read_info, transaction_local_files, transaction_local_data,
+	                                               std::move(pushdown_info));
+
+	// Get the files with extra_stats loaded
+	auto &files = result->GetFiles();
+
+	// Prune files based on JSON key stats
+	vector<DuckLakeFileListEntry> pruned_files;
+	for (auto &file_entry : files) {
+		bool should_prune = false;
+		for (auto &json_filter : json_filters) {
+			if (CanPruneFileByJsonKeyStats(file_entry, json_filter)) {
+				should_prune = true;
+				break;
+			}
+		}
+		if (!should_prune) {
+			pruned_files.push_back(file_entry);
+		}
+	}
+
+	// If no files were pruned, return nullptr to indicate no benefit
+	if (pruned_files.size() == files.size()) {
+		return nullptr;
+	}
+
+	// Return a new file list with only the non-pruned files
+	return make_uniq<DuckLakeMultiFileList>(read_info, std::move(pruned_files));
 }
 
 unique_ptr<MultiFileList>
@@ -91,6 +403,22 @@ DuckLakeMultiFileList::DynamicFilterPushdown(ClientContext &context, const Multi
 	if (pushdown_info->column_filters.empty()) {
 		// no pushdown possible
 		return nullptr;
+	}
+
+	// If this list was created by ComplexFilterPushdown (a pruned list), preserve the files.
+	// The pruned files should be kept, but we still pass the new pushdown_info for runtime filtering.
+	// We don't preserve files for regular lists because they may not have the column_min_max
+	// data needed for the new dynamic filters.
+	if (is_complex_filter_pruned_list) {
+		// Create a new list with the already-loaded (possibly pruned) files
+		auto result = make_uniq<DuckLakeMultiFileList>(read_info, transaction_local_files, transaction_local_data,
+		                                               std::move(pushdown_info));
+		result->files = files;
+		result->read_file_list = true;
+		result->is_complex_filter_pruned_list = true;
+		result->delete_scans = delete_scans;
+		result->inlined_data_tables = inlined_data_tables;
+		return result;
 	}
 
 	return make_uniq<DuckLakeMultiFileList>(read_info, transaction_local_files, transaction_local_data,

@@ -2,6 +2,7 @@
 
 #include "duckdb/common/type_visitor.hpp"
 #include "storage/ducklake_insert.hpp"
+#include "storage/ducklake_stats.hpp"
 #include "storage/ducklake_table_entry.hpp"
 #include "storage/ducklake_transaction.hpp"
 #include "duckdb/common/types/column/column_data_collection.hpp"
@@ -65,11 +66,54 @@ public:
 		}
 	}
 
+	//! Update JSON stats for pass-through data (data going to files, not inlined)
+	void UpdateJsonStats(DataChunk &chunk, const vector<string> &column_names) {
+		lock_guard<mutex> guard(lock);
+		for (idx_t c = 0; c < chunk.ColumnCount(); c++) {
+			auto &col = chunk.data[c];
+			if (!col.GetType().IsJSONType()) {
+				continue;
+			}
+			if (c >= column_names.size()) {
+				continue; // Safety check
+			}
+			const string &col_name = column_names[c];
+
+			// Get or create JSON stats for this column
+			auto it = pass_through_json_stats.find(col_name);
+			if (it == pass_through_json_stats.end()) {
+				pass_through_json_stats.emplace(col_name, DuckLakeColumnJsonKeyStats());
+				it = pass_through_json_stats.find(col_name);
+			}
+			auto &json_stats = it->second;
+
+			// Update stats from this chunk
+			Vector str_vector(LogicalType::VARCHAR, chunk.size());
+			VectorOperations::DefaultCast(col, str_vector, chunk.size());
+
+			UnifiedVectorFormat format;
+			str_vector.ToUnifiedFormat(chunk.size(), format);
+			auto data = UnifiedVectorFormat::GetData<string_t>(format);
+			auto &validity = format.validity;
+
+			for (idx_t i = 0; i < chunk.size(); i++) {
+				auto idx = format.sel->get_index(i);
+				if (!validity.RowIsValid(idx)) {
+					json_stats.UpdateNullStats();
+					continue;
+				}
+				json_stats.UpdateStats(data[idx].GetString());
+			}
+		}
+	}
+
 	const DuckLakeInlineData &op;
 	mutex lock;
 	idx_t total_inlined_rows = 0;
 	InlinePhase global_phase = InlinePhase::INLINING_ROWS;
 	unique_ptr<ColumnDataCollection> global_inlined_data;
+	//! JSON stats accumulated for pass-through data (column name -> stats)
+	unordered_map<string, DuckLakeColumnJsonKeyStats> pass_through_json_stats;
 };
 
 unique_ptr<OperatorState> DuckLakeInlineData::GetOperatorState(ExecutionContext &context) const {
@@ -86,6 +130,15 @@ OperatorResultType DuckLakeInlineData::Execute(ExecutionContext &context, DataCh
 	auto &gstate = gstate_p.Cast<InlineDataGlobalState>();
 	if (state.phase == InlinePhase::PASS_THROUGH_ROWS) {
 		// not inlining rows - forward the input directly
+		// but still accumulate JSON stats for JSON columns
+		if (insert && insert->table) {
+			auto &columns = insert->table->GetColumns();
+			vector<string> column_names;
+			for (auto &col : columns.Logical()) {
+				column_names.push_back(col.GetName());
+			}
+			gstate.UpdateJsonStats(input, column_names);
+		}
 		chunk.Reference(input);
 		return OperatorResultType::NEED_MORE_INPUT;
 	}
@@ -234,10 +287,35 @@ DuckLakeColumnStats GetVectorStats(Vector &input_vec, idx_t row_count) {
 	VectorOperations::DefaultCast(input_vec, str_vector, row_count);
 	// FIXME: we can be more efficient here by templating on other types (numerics...)
 	// FIXME: we can gather nan statistics for FLOAT/DOUBLE
+	DuckLakeColumnStats result(type);
 	if (type.IsNumeric()) {
-		return TemplatedUpdateStats<string_t, StatsNumericFallbackOperator>(str_vector, type, row_count);
+		result = TemplatedUpdateStats<string_t, StatsNumericFallbackOperator>(str_vector, type, row_count);
+	} else {
+		result = TemplatedUpdateStats<string_t, StatsFallbackOperator>(str_vector, type, row_count);
 	}
-	return TemplatedUpdateStats<string_t, StatsFallbackOperator>(str_vector, type, row_count);
+
+	// For JSON columns, also compute per-key stats
+	if (type.IsJSONType()) {
+		if (!result.extra_stats) {
+			result.extra_stats = make_uniq<DuckLakeColumnJsonKeyStats>();
+		}
+		auto &json_stats = result.extra_stats->Cast<DuckLakeColumnJsonKeyStats>();
+		UnifiedVectorFormat format;
+		str_vector.ToUnifiedFormat(row_count, format);
+		auto data = UnifiedVectorFormat::GetData<string_t>(format);
+		auto &validity = format.validity;
+
+		for (idx_t i = 0; i < row_count; i++) {
+			auto idx = format.sel->get_index(i);
+			if (!validity.RowIsValid(idx)) {
+				json_stats.UpdateNullStats();
+				continue;
+			}
+			json_stats.UpdateStats(data[idx].GetString());
+		}
+	}
+
+	return result;
 }
 
 void UpdateStats(vector<DuckLakeBaseColumnStats> &stats, idx_t c, Vector &data, idx_t row_count,
@@ -301,6 +379,26 @@ OperatorFinalResultType DuckLakeInlineData::OperatorFinalize(Pipeline &pipeline,
                                                              OperatorFinalizeInput &input) const {
 	// push inlined data to transaction
 	auto &gstate = input.global_state.Cast<InlineDataGlobalState>();
+
+	// If we have accumulated JSON stats from pass-through data, pass them to the insert state
+	if (!gstate.pass_through_json_stats.empty()) {
+		auto cinsert = const_cast<DuckLakeInsert *>(insert.get());
+		lock_guard<mutex> lock(cinsert->lock);
+		if (!cinsert->sink_state) {
+			cinsert->sink_state = insert->GetGlobalSinkState(context);
+		}
+		auto &insert_gstate = cinsert->sink_state->Cast<DuckLakeInsertGlobalState>();
+		// Merge the accumulated JSON stats
+		for (auto &entry : gstate.pass_through_json_stats) {
+			auto it = insert_gstate.pass_through_json_stats.find(entry.first);
+			if (it == insert_gstate.pass_through_json_stats.end()) {
+				insert_gstate.pass_through_json_stats.emplace(entry.first, std::move(entry.second));
+			} else {
+				it->second.Merge(entry.second);
+			}
+		}
+	}
+
 	if (!gstate.global_inlined_data) {
 		// no inlined data, we are done
 		return OperatorFinalResultType::FINISHED;

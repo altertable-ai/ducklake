@@ -1,0 +1,146 @@
+# name: test/sql/stats/json_key_stats.test
+# description: Test JSON key statistics for file pruning
+# group: [stats]
+
+require json
+
+require parquet
+
+require ducklake
+
+test-env DUCKLAKE_CONNECTION __TEST_DIR__/{UUID}.db
+
+test-env DATA_PATH __TEST_DIR__
+
+statement ok
+ATTACH 'ducklake:${DUCKLAKE_CONNECTION}' AS ducklake (DATA_PATH '${DATA_PATH}/ducklake_json_key_stats_files')
+
+# Create a table with a JSON column
+statement ok
+CREATE TABLE ducklake.json_test (id INTEGER, data JSON);
+
+# File 1: names a-c, ages 20-30, nested city starting with 'A'
+statement ok
+INSERT INTO ducklake.json_test VALUES 
+    (1, '{"name": "alice", "age": 25, "address": {"city": "Atlanta", "zip": "30301"}}'),
+    (2, '{"name": "bob", "age": 28, "address": {"city": "Austin", "zip": "73301"}}'),
+    (3, '{"name": "carol", "age": 30, "address": {"city": "Anchorage", "zip": "99501"}}');
+
+# File 2: names x-z, ages 40-50, nested city starting with 'Z'
+statement ok
+INSERT INTO ducklake.json_test VALUES 
+    (4, '{"name": "xavier", "age": 40, "address": {"city": "Zanesville", "zip": "43701"}}'),
+    (5, '{"name": "yolanda", "age": 45, "address": {"city": "Zion", "zip": "60099"}}'),
+    (6, '{"name": "zach", "age": 50, "address": {"city": "Zephyr", "zip": "76890"}}');
+
+# File 3: names m-o, ages 60-70, nested city starting with 'M'
+statement ok
+INSERT INTO ducklake.json_test VALUES 
+    (7, '{"name": "mary", "age": 60, "address": {"city": "Miami", "zip": "33101"}}'),
+    (8, '{"name": "nick", "age": 65, "address": {"city": "Memphis", "zip": "37501"}}'),
+    (9, '{"name": "olivia", "age": 70, "address": {"city": "Milwaukee", "zip": "53201"}}');
+
+# Verify we have 3 files
+query I
+SELECT count(*) FROM ducklake_list_files('ducklake', 'json_test');
+----
+3
+
+# =============================================================================
+# Test 1: Equality filter on top-level key - should read 1 file
+# =============================================================================
+query II
+SELECT id, json_extract_string(data, '$.name') FROM ducklake.json_test 
+WHERE json_extract_string(data, '$.name') = 'zach' ORDER BY id;
+----
+6	zach
+
+# 'zach' is only in file 2 (x-z range), files 1 and 3 can be pruned
+query II
+EXPLAIN ANALYZE SELECT id FROM ducklake.json_test WHERE json_extract_string(data, '$.name') = 'zach';
+----
+analyzed_plan	<REGEX>:.*Total Files Read: 1.*
+
+# =============================================================================
+# Test 2: Range filter on top-level key - should read 2 files
+# =============================================================================
+query I
+SELECT COUNT(*) FROM ducklake.json_test WHERE json_extract_string(data, '$.name') >= 'mary';
+----
+6
+
+# 'mary' and above includes files 2 (x-z) and 3 (m-o), file 1 (a-c) can be pruned
+query II
+EXPLAIN ANALYZE SELECT COUNT(*) FROM ducklake.json_test WHERE json_extract_string(data, '$.name') >= 'mary';
+----
+analyzed_plan	<REGEX>:.*Total Files Read: 2.*
+
+# =============================================================================
+# Test 3: Filter that matches no files - all files pruned
+# =============================================================================
+query I
+SELECT COUNT(*) FROM ducklake.json_test WHERE json_extract_string(data, '$.name') = 'john';
+----
+0
+
+# 'john' > 'carol' (file 1 max) and < 'mary' (file 3 min) and < 'xavier' (file 2 min)
+# All files can be pruned
+query II
+EXPLAIN ANALYZE SELECT COUNT(*) FROM ducklake.json_test WHERE json_extract_string(data, '$.name') = 'john';
+----
+analyzed_plan	<REGEX>:.*Total Files Read: 0.*
+
+# =============================================================================
+# Test 4: Equality filter on nested key - should read 1 file
+# =============================================================================
+query II
+SELECT id, json_extract_string(data, '$.address.city') FROM ducklake.json_test 
+WHERE json_extract_string(data, '$.address.city') = 'Miami' ORDER BY id;
+----
+7	Miami
+
+# 'Miami' is only in file 3, files 1 and 2 can be pruned
+query II
+EXPLAIN ANALYZE SELECT id FROM ducklake.json_test WHERE json_extract_string(data, '$.address.city') = 'Miami';
+----
+analyzed_plan	<REGEX>:.*Total Files Read: 1.*
+
+# =============================================================================
+# Test 5: Range filter on nested key - should read 2 files
+# =============================================================================
+query I
+SELECT COUNT(*) FROM ducklake.json_test WHERE json_extract_string(data, '$.address.city') >= 'M';
+----
+6
+
+# Cities >= 'M' are in file 2 (Z cities) and file 3 (M cities)
+# File 1 has A cities (max='Austin') which is < 'M', so can be pruned
+query II
+EXPLAIN ANALYZE SELECT COUNT(*) FROM ducklake.json_test WHERE json_extract_string(data, '$.address.city') >= 'M';
+----
+analyzed_plan	<REGEX>:.*Total Files Read: 2.*
+
+# =============================================================================
+# Test 6: Filter on key that doesn't exist - should prune all files
+# =============================================================================
+query I
+SELECT COUNT(*) FROM ducklake.json_test WHERE json_extract_string(data, '$.nonexistent') = 'value';
+----
+0
+
+# Key doesn't exist in any file, so all files can be pruned
+query II
+EXPLAIN ANALYZE SELECT COUNT(*) FROM ducklake.json_test WHERE json_extract_string(data, '$.nonexistent') = 'value';
+----
+analyzed_plan	<REGEX>:.*Total Files Read: 0.*
+
+# =============================================================================
+# Test 7: No filter - should read all 3 files
+# =============================================================================
+query II
+EXPLAIN ANALYZE SELECT COUNT(*) FROM ducklake.json_test;
+----
+analyzed_plan	<REGEX>:.*Total Files Read: 3.*
+
+statement ok
+DROP TABLE ducklake.json_test;

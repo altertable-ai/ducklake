@@ -1094,9 +1094,33 @@ vector<DuckLakeFileListEntry> DuckLakeMetadataManager::GetFilesForTable(DuckLake
                                                                         DuckLakeSnapshot snapshot,
                                                                         const FilterPushdownInfo *filter_info) {
 	auto table_id = table.GetTableId();
+	// Include file-level stats for filter pushdown purposes
+	// This includes both dynamic filters (Top-N) and regular column filters (for JSON stats, etc.)
+	vector<idx_t> minmax_columns;
+	if (filter_info) {
+		for (auto &entry : filter_info->column_filters) {
+			auto &col_filter = entry.second;
+			// Include all columns that have filters - we might need their stats for pruning
+			minmax_columns.push_back(col_filter.column_field_index);
+		}
+	}
+
+	string stats_select_list;
+	string stats_join_list;
+	for (idx_t i = 0; i < minmax_columns.size(); i++) {
+		auto col_id = minmax_columns[i];
+		auto alias = StringUtil::Format("stats_%d", NumericCast<int64_t>(i));
+		stats_select_list += StringUtil::Format(", %s.min_value, %s.max_value, %s.extra_stats", alias.c_str(),
+		                                        alias.c_str(), alias.c_str());
+		stats_join_list += StringUtil::Format(
+		    "\nLEFT JOIN {METADATA_CATALOG}.ducklake_file_column_stats %s ON %s.data_file_id = data.data_file_id AND "
+		    "%s.table_id = data.table_id AND %s.column_id = %d",
+		    alias.c_str(), alias.c_str(), alias.c_str(), alias.c_str(), NumericCast<int64_t>(col_id));
+	}
+
 	string select_list = GetFileSelectList("data") +
 	                     ", data.row_id_start, data.begin_snapshot, data.partial_file_info, data.mapping_id, " +
-	                     GetFileSelectList("del");
+	                     GetFileSelectList("del") + stats_select_list;
 
 	string query;
 	string where_clause;
@@ -1117,10 +1141,10 @@ LEFT JOIN (
     FROM {METADATA_CATALOG}.ducklake_delete_file
     WHERE table_id=%d  AND {SNAPSHOT_ID} >= begin_snapshot
           AND ({SNAPSHOT_ID} < end_snapshot OR end_snapshot IS NULL)
-    ) del USING (data_file_id)
+    ) del USING (data_file_id)%s
 WHERE data.table_id=%d AND {SNAPSHOT_ID} >= data.begin_snapshot AND ({SNAPSHOT_ID} < data.end_snapshot OR data.end_snapshot IS NULL)
 		)",
-	                            select_list, table_id.index, table_id.index);
+	                            select_list, table_id.index, stats_join_list, table_id.index);
 
 	// Add WHERE clause from filters if it was generated
 	if (!where_clause.empty()) {
@@ -1150,6 +1174,27 @@ WHERE data.table_id=%d AND {SNAPSHOT_ID} >= data.begin_snapshot AND ({SNAPSHOT_I
 		}
 		col_idx++;
 		file_entry.delete_file = ReadDataFile(table, row, col_idx, IsEncrypted());
+		for (auto &minmax_col : minmax_columns) {
+			string min_val;
+			string max_val;
+			string extra_stats_val;
+			if (!row.IsNull(col_idx)) {
+				min_val = row.GetValue<string>(col_idx);
+			}
+			col_idx++;
+			if (!row.IsNull(col_idx)) {
+				max_val = row.GetValue<string>(col_idx);
+			}
+			col_idx++;
+			if (!row.IsNull(col_idx)) {
+				extra_stats_val = row.GetValue<string>(col_idx);
+			}
+			col_idx++;
+			file_entry.column_min_max.emplace(minmax_col, make_pair(std::move(min_val), std::move(max_val)));
+			if (!extra_stats_val.empty()) {
+				file_entry.column_extra_stats.emplace(minmax_col, std::move(extra_stats_val));
+			}
+		}
 		files.push_back(std::move(file_entry));
 	}
 	return files;

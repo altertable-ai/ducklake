@@ -172,6 +172,17 @@ void DuckLakeInsert::AddWrittenFiles(DuckLakeInsertGlobalState &global_state, Da
 				}
 			}
 
+			// For JSON columns, merge accumulated JSON stats from pass-through data
+			if (field_id.Type().IsJSONType() && column_names.size() == 1) {
+				auto json_stats_it = global_state.pass_through_json_stats.find(column_names[0]);
+				if (json_stats_it != global_state.pass_through_json_stats.end()) {
+					if (!column_stats.extra_stats) {
+						column_stats.extra_stats = make_uniq<DuckLakeColumnJsonKeyStats>();
+					}
+					column_stats.extra_stats->Merge(json_stats_it->second);
+				}
+			}
+
 			data_file.column_stats.insert(make_pair(field_id.GetFieldIndex(), std::move(column_stats)));
 		}
 		// extract the partition info
@@ -752,7 +763,17 @@ PhysicalOperator &DuckLakeCatalog::PlanInsert(ClientContext &context, PhysicalPl
 	optional_ptr<DuckLakeInlineData> inline_data;
 
 	idx_t data_inlining_row_limit = DataInliningRowLimit(ducklake_schema.GetSchemaId(), ducklake_table.GetTableId());
-	if (data_inlining_row_limit > 0) {
+	// Check if table has JSON columns - if so, we need DuckLakeInlineData to compute JSON key stats
+	bool has_json_columns = false;
+	for (auto &col : ducklake_table.GetColumns().Logical()) {
+		if (col.GetType().IsJSONType()) {
+			has_json_columns = true;
+			break;
+		}
+	}
+	// Add DuckLakeInlineData if we need inlining OR if we have JSON columns (for stats computation)
+	if (data_inlining_row_limit > 0 || has_json_columns) {
+		// Use the configured limit, or 0 if only adding for JSON stats
 		plan = planner.Make<DuckLakeInlineData>(*plan, data_inlining_row_limit);
 		inline_data = plan->Cast<DuckLakeInlineData>();
 	}
@@ -776,7 +797,16 @@ PhysicalOperator &DuckLakeCatalog::PlanCreateTableAs(ClientContext &context, Phy
 	reference<PhysicalOperator> root = plan;
 	optional_ptr<DuckLakeInlineData> inline_data;
 	idx_t data_inlining_row_limit = DataInliningRowLimit(duck_schema.GetSchemaId(), TableIndex());
-	if (data_inlining_row_limit > 0) {
+	// Check if table has JSON columns - if so, we need DuckLakeInlineData to compute JSON key stats
+	bool has_json_columns = false;
+	for (auto &col : columns.Logical()) {
+		if (col.GetType().IsJSONType()) {
+			has_json_columns = true;
+			break;
+		}
+	}
+	// Add DuckLakeInlineData if we need inlining OR if we have JSON columns (for stats computation)
+	if (data_inlining_row_limit > 0 || has_json_columns) {
 		root = planner.Make<DuckLakeInlineData>(root.get(), data_inlining_row_limit);
 		inline_data = root.get().Cast<DuckLakeInlineData>();
 	}

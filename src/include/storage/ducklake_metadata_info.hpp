@@ -292,6 +292,9 @@ struct DuckLakeFileListEntry {
 	optional_idx snapshot_filter;
 	MappingIndex mapping_id;
 	DuckLakeDataType data_type = DuckLakeDataType::DATA_FILE;
+	unordered_map<idx_t, pair<string, string>> column_min_max;
+	//! Extra stats per column (e.g., JSON key stats) - column_id -> serialized extra_stats JSON
+	unordered_map<idx_t, string> column_extra_stats;
 };
 
 struct DuckLakeDeleteScanEntry {
