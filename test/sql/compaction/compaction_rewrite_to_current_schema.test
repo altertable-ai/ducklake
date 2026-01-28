@@ -1,0 +1,122 @@
+# name: test/sql/compaction/compaction_rewrite_to_current_schema.test
+# description: test compaction that rewrites files from old schemas to the current schema
+# group: [compaction]
+
+require ducklake
+
+require parquet
+
+test-env DUCKLAKE_CONNECTION __TEST_DIR__/{UUID}.db
+
+test-env DATA_PATH __TEST_DIR__
+
+statement ok
+ATTACH 'ducklake:${DUCKLAKE_CONNECTION}' AS ducklake (DATA_PATH '${DATA_PATH}/ducklake_rewrite_schema')
+
+# snapshot 1
+statement ok
+CREATE TABLE ducklake.test(id INTEGER, i INTEGER);
+
+# snapshot 2 - first small file
+statement ok
+INSERT INTO ducklake.test VALUES (1, 10);
+
+# snapshot 3 - second small file
+statement ok
+INSERT INTO ducklake.test VALUES (2, 20);
+
+# snapshot 4 - add a column (schema change)
+statement ok
+ALTER TABLE ducklake.test ADD COLUMN j INTEGER
+
+# snapshot 5 - third small file with new schema
+statement ok
+INSERT INTO ducklake.test VALUES (3, 30, 300);
+
+# snapshot 6 - fourth small file with new schema
+statement ok
+INSERT INTO ducklake.test VALUES (4, 40, 400);
+
+# verify current state
+query III
+SELECT * FROM ducklake.test ORDER BY id
+----
+1	10	NULL
+2	20	NULL
+3	30	300
+4	40	400
+
+# verify file count before compaction - should be 4 files
+query I
+SELECT COUNT(*) FROM GLOB('${DATA_PATH}/ducklake_rewrite_schema/**/*.parquet')
+----
+4
+
+query I
+SELECT COUNT(*) FROM ducklake_list_files('ducklake', 'test');
+----
+4
+
+# run rewrite_to_current_schema to merge all files across schema boundaries into one
+statement ok
+CALL ducklake_rewrite_to_current_schema('ducklake');
+
+# we should have 1 new file (merged) + 4 old files (for time travel) = 5
+query I
+SELECT COUNT(*) FROM GLOB('${DATA_PATH}/ducklake_rewrite_schema/**/*.parquet')
+----
+5
+
+# only 1 visible file now
+query I
+SELECT COUNT(*) FROM ducklake_list_files('ducklake', 'test');
+----
+1
+
+# check associated snapshot ids
+query IIII
+SELECT snapshot_id, * FROM ducklake.test ORDER BY id
+----
+2	1	10	NULL
+3	2	20	NULL
+5	3	30	300
+6	4	40	400
+
+# verify time travel to older snapshots still works
+# snapshot 3: before any schema changes (should see 2 columns)
+query II
+SELECT * FROM ducklake.test AT (VERSION => 3) ORDER BY id
+----
+1	10
+2	20
+
+# snapshot 5: after schema change (should see 3 columns)
+query III
+SELECT * FROM ducklake.test AT (VERSION => 5) ORDER BY id
+----
+1	10	NULL
+2	20	NULL
+3	30	300
+
+# expire old snapshots so that old files can be cleaned up
+statement ok
+CALL ducklake_expire_snapshots('ducklake', older_than => NOW()::TIMESTAMP + INTERVAL '1 day');
+
+# cleanup old files - now they should be removed since snapshots are expired
+statement ok
+CALL ducklake_cleanup_old_files('ducklake', cleanup_all => true);
+
+# now we should have only 1 file
+query I
+SELECT COUNT(*) FROM GLOB('${DATA_PATH}/ducklake_rewrite_schema/**/*.parquet')
+----
+1
+
+# verify current state still works after cleanup
+query III
+SELECT * FROM ducklake.test ORDER BY id
+----
+1	10	NULL
+2	20	NULL
+3	30	300
+4	40	400

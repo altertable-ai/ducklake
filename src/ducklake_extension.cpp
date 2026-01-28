@@ -40,6 +40,9 @@ static void LoadInternal(ExtensionLoader &loader) {
 	auto rewrite_files = DuckLakeRewriteDataFilesFunction::GetFunctions();
 	loader.RegisterFunction(rewrite_files);
 
+	auto rewrite_to_current_schema = DuckLakeRewriteToCurrentSchemaFunction::GetFunctions();
+	loader.RegisterFunction(rewrite_to_current_schema);
+
 	DuckLakeCleanupOldFilesFunction cleanup_old_files;
 	loader.RegisterFunction(cleanup_old_files);
 

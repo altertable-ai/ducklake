@@ -27,8 +27,9 @@ namespace duckdb {
 //===--------------------------------------------------------------------===//
 
 enum class CompactionType {
-	MERGE_ADJACENT_TABLES, // Merge adjacent tables
-	REWRITE_DELETES        // Rewrite deletes that delete more than a % of the table, might also do merge of files.
+	MERGE_ADJACENT_TABLES,       // Merge adjacent tables
+	REWRITE_DELETES,             // Rewrite deletes that delete more than a % of the table, might also do merge of files.
+	REWRITE_TO_CURRENT_SCHEMA    // Rewrite files from older schemas to the current schema
 };
 
 enum class CleanupType {

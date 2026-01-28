@@ -141,7 +141,8 @@ public:
 class DuckLakeCompactor {
 public:
 	DuckLakeCompactor(ClientContext &context, DuckLakeCatalog &catalog, DuckLakeTransaction &transaction,
-	                  Binder &binder, TableIndex table_id, DuckLakeMergeAdjacentOptions options);
+	                  Binder &binder, TableIndex table_id, DuckLakeMergeAdjacentOptions options,
+	                  CompactionType type = CompactionType::MERGE_ADJACENT_TABLES);
 	DuckLakeCompactor(ClientContext &context, DuckLakeCatalog &catalog, DuckLakeTransaction &transaction,
 	                  Binder &binder, TableIndex table_id, double delete_threshold);
 	void GenerateCompactions(DuckLakeTableEntry &table, vector<unique_ptr<LogicalOperator>> &compactions);
@@ -160,9 +161,10 @@ private:
 };
 
 DuckLakeCompactor::DuckLakeCompactor(ClientContext &context, DuckLakeCatalog &catalog, DuckLakeTransaction &transaction,
-                                     Binder &binder, TableIndex table_id, DuckLakeMergeAdjacentOptions options)
+                                     Binder &binder, TableIndex table_id, DuckLakeMergeAdjacentOptions options,
+                                     CompactionType type)
     : context(context), catalog(catalog), transaction(transaction), binder(binder), table_id(table_id),
-      options(options), type(CompactionType::MERGE_ADJACENT_TABLES) {
+      options(options), type(type) {
 }
 
 DuckLakeCompactor::DuckLakeCompactor(ClientContext &context, DuckLakeCatalog &catalog, DuckLakeTransaction &transaction,
@@ -238,7 +240,13 @@ void DuckLakeCompactor::GenerateCompactions(DuckLakeTableEntry &table,
 		}
 		// construct the compaction group for this file - i.e. the set of candidate files we can compact it with
 		DuckLakeCompactionGroup group;
-		group.schema_version = candidate.schema_version;
+		// For REWRITE_TO_CURRENT_SCHEMA, we group only by partition, ignoring schema_version
+		// by setting all files to the current schema version so they get grouped together
+		if (type == CompactionType::REWRITE_TO_CURRENT_SCHEMA) {
+			group.schema_version = snapshot.schema_version;
+		} else {
+			group.schema_version = candidate.schema_version;
+		}
 		group.partition_id = candidate.file.partition_id;
 		group.partition_values = candidate.file.partition_values;
 
@@ -315,8 +323,15 @@ void DuckLakeCompactor::GenerateCompactions(DuckLakeTableEntry &table,
 unique_ptr<LogicalOperator>
 DuckLakeCompactor::GenerateCompactionCommand(vector<DuckLakeCompactionFileEntry> source_files) {
 	// get the table entry at the specified snapshot
-	auto snapshot_id = source_files[0].file.begin_snapshot;
-	DuckLakeSnapshot snapshot(snapshot_id, source_files[0].schema_version, 0, 0);
+	// For REWRITE_TO_CURRENT_SCHEMA, we use the current transaction schema (latest)
+	// Otherwise, we use the schema from the source file's snapshot
+	DuckLakeSnapshot snapshot;
+	if (type == CompactionType::REWRITE_TO_CURRENT_SCHEMA) {
+		snapshot = transaction.GetSnapshot();
+	} else {
+		auto snapshot_id = source_files[0].file.begin_snapshot;
+		snapshot = DuckLakeSnapshot(snapshot_id, source_files[0].schema_version, 0, 0);
+	}
 
 	auto entry = catalog.GetEntryById(transaction, snapshot, table_id);
 	if (!entry) {
@@ -354,9 +369,16 @@ DuckLakeCompactor::GenerateCompactionCommand(vector<DuckLakeCompactionFileEntry>
 			break;
 		}
 		case CompactionType::MERGE_ADJACENT_TABLES: {
-			if (!source.delete_files.empty() && type == CompactionType::MERGE_ADJACENT_TABLES) {
+			if (!source.delete_files.empty()) {
 				// Merge Adjacent Tables does not support compaction
 				throw InternalException("merge_adjacent_files should not be used to rewrite files with deletes");
+			}
+			break;
+		}
+		case CompactionType::REWRITE_TO_CURRENT_SCHEMA: {
+			// REWRITE_TO_CURRENT_SCHEMA does not handle delete files (similar to MERGE_ADJACENT_TABLES)
+			if (!source.delete_files.empty()) {
+				throw InternalException("rewrite_to_current_schema should not be used to rewrite files with deletes");
 			}
 			break;
 		}
@@ -420,6 +442,12 @@ DuckLakeCompactor::GenerateCompactionCommand(vector<DuckLakeCompactionFileEntry>
 	case CompactionType::REWRITE_DELETES: {
 		// when there are delete files, we always need to write row-ids because deleted rows create gaps
 		write_row_id = true;
+		break;
+	}
+	case CompactionType::REWRITE_TO_CURRENT_SCHEMA: {
+		// for REWRITE_TO_CURRENT_SCHEMA, we follow the same logic as MERGE_ADJACENT_TABLES
+		// if files are adjacent, we don't need to write the row-id to the file
+		write_row_id = !files_are_adjacent;
 		break;
 	}
 	default:
@@ -528,13 +556,14 @@ static void GenerateCompaction(ClientContext &context, DuckLakeTransaction &tran
                                uint64_t max_files, optional_idx min_file_size, optional_idx max_file_size,
                                vector<unique_ptr<LogicalOperator>> &compactions) {
 	switch (type) {
-	case CompactionType::MERGE_ADJACENT_TABLES: {
+	case CompactionType::MERGE_ADJACENT_TABLES:
+	case CompactionType::REWRITE_TO_CURRENT_SCHEMA: {
 		DuckLakeMergeAdjacentOptions options;
 		options.max_files = max_files;
 		options.min_file_size = min_file_size;
 		options.max_file_size = max_file_size;
 		DuckLakeCompactor compactor(context, ducklake_catalog, transaction, *input.binder, cur_table.GetTableId(),
-		                            options);
+		                            options, type);
 		compactor.GenerateCompactions(cur_table, compactions);
 		break;
 	}
@@ -692,6 +721,29 @@ TableFunctionSet DuckLakeRewriteDataFilesFunction::GetFunctions() {
 		function.named_parameters["delete_threshold"] = LogicalType::DOUBLE;
 		if (type.size() == 2) {
 			function.named_parameters["schema"] = LogicalType::VARCHAR;
+		}
+		set.AddFunction(function);
+	}
+	return set;
+}
+
+static unique_ptr<LogicalOperator> RewriteToCurrentSchemaBind(ClientContext &context, TableFunctionBindInput &input,
+                                                              idx_t bind_index, vector<string> &return_names) {
+	return_names.push_back("Success");
+	return BindCompaction(context, input, bind_index, CompactionType::REWRITE_TO_CURRENT_SCHEMA);
+}
+
+TableFunctionSet DuckLakeRewriteToCurrentSchemaFunction::GetFunctions() {
+	TableFunctionSet set("ducklake_rewrite_to_current_schema");
+	const vector<vector<LogicalType>> at_types {{LogicalType::VARCHAR, LogicalType::VARCHAR}, {LogicalType::VARCHAR}};
+	for (auto &type : at_types) {
+		TableFunction function("ducklake_rewrite_to_current_schema", type, nullptr, nullptr, nullptr);
+		function.bind_operator = RewriteToCurrentSchemaBind;
+		function.named_parameters["min_file_size"] = LogicalType::UBIGINT;
+		function.named_parameters["max_file_size"] = LogicalType::UBIGINT;
+		if (type.size() == 2) {
+			function.named_parameters["schema"] = LogicalType::VARCHAR;
+			function.named_parameters["max_compacted_files"] = LogicalType::UBIGINT;
 		}
 		set.AddFunction(function);
 	}
