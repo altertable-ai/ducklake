@@ -30,6 +30,10 @@ ATTACH 'ducklake:__TEST_DIR__/${version}.db' AS ducklake (DATA_PATH '__TEST_DIR_
 statement ok
 INSERT INTO ducklake.test VALUES (42);
 
+# flush inlined data to create files
+statement ok
+CALL ducklake_flush_inlined_data('ducklake')
+
 query I
 FROM ducklake.test
 ----
