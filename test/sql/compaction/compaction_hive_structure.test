@@ -11,6 +11,7 @@ test-env DUCKLAKE_CONNECTION __TEST_DIR__/{UUID}.db
 test-env DATA_PATH __TEST_DIR__
 
 
+# Disable inlining - this test has table renames which have bugs with inlined data
 statement ok
 ATTACH 'ducklake:${DUCKLAKE_CONNECTION}' AS ducklake (DATA_PATH '${DATA_PATH}/ducklake_compaction_hive')
 

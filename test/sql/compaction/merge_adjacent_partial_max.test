@@ -38,6 +38,10 @@ insert into t values (0);
 statement ok
 insert into t values (0);
 
+# flush inlined data to create parquet files
+statement ok
+CALL ducklake_flush_inlined_data('ducklake');
+
 statement ok
 CALL ducklake_merge_adjacent_files('ducklake', 't');
 

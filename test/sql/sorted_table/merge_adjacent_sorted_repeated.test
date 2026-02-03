@@ -23,24 +23,30 @@ CREATE TABLE prevent_duplicates (unique_id BIGINT, sort_key_1 BIGINT, sort_key_2
 statement ok
 INSERT INTO prevent_duplicates (unique_id, sort_key_1, sort_key_2)
 FROM range(4) t(i)
-SELECT 
+SELECT
     i AS unique_id,
     i % 2 AS sort_key_1,
     'woot' || i AS sort_key_2
-ORDER BY 
+ORDER BY
     i DESC
 ;
 
 statement ok
+CALL ducklake_flush_inlined_data('ducklake')
+
+statement ok
 INSERT INTO prevent_duplicates (unique_id, sort_key_1, sort_key_2)
 FROM range(4) t(i)
-SELECT 
+SELECT
     i + 4 AS unique_id,
     (i + 4) % 2 AS sort_key_1,
     'woot' || (i + 4) AS sort_key_2
-ORDER BY 
+ORDER BY
     i DESC
 ;
+
+statement ok
+CALL ducklake_flush_inlined_data('ducklake')
 
 query III
 FROM prevent_duplicates
@@ -63,8 +69,8 @@ WHERE
 t.table_name = 'prevent_duplicates'
 ORDER BY ALL
 ----
-0	1
 1	1
+3	1
 
 statement ok
 ALTER TABLE ducklake.prevent_duplicates SET SORTED BY (sort_key_1 ASC NULLS LAST, sort_key_2 ASC NULLS LAST);
@@ -96,7 +102,7 @@ ON df.table_id = t.table_id
 WHERE
 t.table_name = 'prevent_duplicates'
 ----
-2	1
+4	1
 
 # We should only have 2 rows in the metadata table for this DuckLake table
 query IIII
@@ -108,8 +114,8 @@ WHERE
 si.table_id = 1
 ORDER BY ALL
 ----
-1	4	NULL	0
-1	4	NULL	1
+1	6	NULL	0
+1	6	NULL	1
 
 
 # Multiple SET SORTED BY calls with different sort orders should have separate catalog entries
@@ -119,24 +125,30 @@ CREATE TABLE multiple_set_sorted (unique_id BIGINT, sort_key_1 BIGINT, sort_key_
 statement ok
 INSERT INTO multiple_set_sorted (unique_id, sort_key_1, sort_key_2)
 FROM range(4) t(i)
-SELECT 
+SELECT
     i AS unique_id,
     i % 2 AS sort_key_1,
     'woot' || i AS sort_key_2
-ORDER BY 
+ORDER BY
     i DESC
 ;
 
 statement ok
+CALL ducklake_flush_inlined_data('ducklake')
+
+statement ok
 INSERT INTO multiple_set_sorted (unique_id, sort_key_1, sort_key_2)
 FROM range(4) t(i)
-SELECT 
+SELECT
     i + 4 AS unique_id,
     (i + 4) % 2 AS sort_key_1,
     'woot' || (i + 4) AS sort_key_2
-ORDER BY 
+ORDER BY
     i DESC
 ;
+
+statement ok
+CALL ducklake_flush_inlined_data('ducklake')
 
 query III
 FROM multiple_set_sorted
@@ -159,8 +171,8 @@ WHERE
 t.table_name = 'multiple_set_sorted'
 ORDER BY ALL
 ----
-3	4
-4	4
+6	4
+8	4
 
 statement ok
 ALTER TABLE ducklake.multiple_set_sorted SET SORTED BY (sort_key_1 DESC NULLS FIRST, sort_key_2 DESC NULLS FIRST);
@@ -192,7 +204,7 @@ ON df.table_id = t.table_id
 WHERE
 t.table_name = 'multiple_set_sorted'
 ----
-5	4
+9	4
 
 # We should have 4 rows in the metadata table for this DuckLake table
 query IIIIIIII
@@ -205,7 +217,7 @@ WHERE
 si.table_id = 4
 ORDER BY si.table_id, si.begin_snapshot, si.end_snapshot, se.sort_key_index
 ----
-4	10	11	0	sort_key_1	duckdb	DESC	NULLS_FIRST
-4	10	11	1	sort_key_2	duckdb	DESC	NULLS_FIRST
-4	11	NULL	0	sort_key_1	duckdb	ASC	NULLS_LAST
-4	11	NULL	1	sort_key_2	duckdb	ASC	NULLS_LAST
+4	14	15	0	sort_key_1	duckdb	DESC	NULLS_FIRST
+4	14	15	1	sort_key_2	duckdb	DESC	NULLS_FIRST
+4	15	NULL	0	sort_key_1	duckdb	ASC	NULLS_LAST
+4	15	NULL	1	sort_key_2	duckdb	ASC	NULLS_LAST
