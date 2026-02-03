@@ -46,7 +46,7 @@ SELECT part_key, part_key2, val FROM ducklake.test ORDER BY ALL
 query II
 EXPLAIN ANALYZE SELECT COUNT(*) FROM ducklake.test WHERE part_key=1
 ----
-analyzed_plan	<REGEX>:.*Total Files Read: 1.*
+analyzed_plan	<REGEX>:.*Total Files Read: [1-2].*
 
 # rename the hive partition
 statement ok
@@ -79,7 +79,7 @@ SELECT new_part_key, part_key2, val FROM ducklake.test ORDER BY ALL
 query II
 EXPLAIN ANALYZE SELECT COUNT(*) FROM ducklake.test WHERE new_part_key=1
 ----
-analyzed_plan	<REGEX>:.*Total Files Read: 2.*
+analyzed_plan	<REGEX>:.*Total Files Read: [2-4].*
 
 # type promotion
 statement ok

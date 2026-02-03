@@ -34,6 +34,9 @@ CREATE TABLE ducklake.test(s VARCHAR);
 statement ok con2
 INSERT INTO ducklake.test VALUES ('hello'), ('world');
 
+statement ok con2
+CALL ducklake_flush_inlined_data('ducklake')
+
 statement ok con1
 COMMIT
 

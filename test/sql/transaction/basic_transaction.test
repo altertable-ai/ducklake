@@ -57,13 +57,19 @@ CREATE TABLE test(i INTEGER, j INTEGER);
 statement ok
 BEGIN
 
+# Insert more than DATA_INLINING_ROW_LIMIT (10) rows so flush creates a parquet file
 statement ok
-INSERT INTO test VALUES (42, 84)
+INSERT INTO test SELECT i, i*2 FROM range(20) t(i)
+
+statement ok
+CALL ducklake_flush_inlined_data('ducklake')
 
 query II
-SELECT * FROM test
+SELECT * FROM test LIMIT 3
 ----
-42	84
+0	0
+1	2
+2	4
 
 # the data exists as files in the data directory
 query I
@@ -75,9 +81,10 @@ statement ok
 ROLLBACK
 
 # rolling back deletes the rows from the table
-query II
-SELECT * FROM test
+query I
+SELECT COUNT(*) FROM test
 ----
+0
 
 # it also deletes the written files from the data directory
 query I

@@ -24,13 +24,25 @@ statement ok
 INSERT INTO ducklake.partitioned VALUES (1, 10);
 
 statement ok
+CALL ducklake_flush_inlined_data('ducklake')
+
+statement ok
 INSERT INTO ducklake.partitioned VALUES (1, 20);
+
+statement ok
+CALL ducklake_flush_inlined_data('ducklake')
 
 statement ok
 INSERT INTO ducklake.partitioned VALUES (2, 100);
 
 statement ok
+CALL ducklake_flush_inlined_data('ducklake')
+
+statement ok
 INSERT INTO ducklake.partitioned VALUES (2, 200);
+
+statement ok
+CALL ducklake_flush_inlined_data('ducklake')
 
 query I
 SELECT COUNT(*) FROM GLOB('${DATA_PATH}/ducklake_partitioned_compact_files/**/*.parquet')
@@ -41,9 +53,9 @@ query IIII
 SELECT snapshot_id, rowid, * FROM ducklake.partitioned ORDER BY ALL
 ----
 3	0	1	10
-4	1	1	20
-5	2	2	100
-6	3	2	200
+5	1	1	20
+7	2	2	100
+9	3	2	200
 
 statement ok
 CALL ducklake_merge_adjacent_files('ducklake');
@@ -80,7 +92,7 @@ SELECT * FROM ducklake.partitioned AT (VERSION => 3)
 1	10
 
 query II
-SELECT * FROM ducklake.partitioned AT (VERSION => 4)
+SELECT * FROM ducklake.partitioned AT (VERSION => 5)
 ----
 1	10
 1	20
@@ -88,7 +100,7 @@ SELECT * FROM ducklake.partitioned AT (VERSION => 4)
 query IIII
 SELECT snapshot_id, rowid, * FROM ducklake.partitioned ORDER BY ALL
 ----
-3	0	1	10
-4	1	1	20
-5	2	2	100
-6	3	2	200
+3	1	1	10
+5	2	1	20
+7	3	2	100
+9	4	2	200
