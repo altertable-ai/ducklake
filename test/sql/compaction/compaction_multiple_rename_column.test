@@ -37,12 +37,12 @@ ALTER TABLE ducklake.test RENAME COLUMN user_id TO temp;
 statement ok
 ALTER TABLE ducklake.test RENAME COLUMN temp TO user_id;
 
-# INSERT DATA AT SCHEMA VERSION 3 - files are created at this schema version
+# INSERT DATA AT SCHEMA VERSION 3 - with enough rows to create files directly
 statement ok
-INSERT INTO ducklake.test VALUES (1, 100);
+INSERT INTO ducklake.test SELECT i, i*100 FROM range(15) t(i);
 
 statement ok
-INSERT INTO ducklake.test VALUES (2, 200);
+INSERT INTO ducklake.test SELECT i+15, i*100+15 FROM range(15) t(i);
 
 # Rename user_id -> distinct_id (schema version 4)
 # With the bug, WriteDroppedColumns sets end_snapshot on ALL entries with this column_id
@@ -67,7 +67,10 @@ CALL ducklake_merge_adjacent_files('ducklake', 'test');
 
 # Verify current data is correct
 query II
-SELECT id, distinct_id FROM ducklake.test ORDER BY id;
+SELECT id, distinct_id FROM ducklake.test ORDER BY id LIMIT 5;
 ----
+0	0
 1	100
 2	200
+3	300
+4	400

@@ -16,25 +16,25 @@ ATTACH 'ducklake:${DUCKLAKE_CONNECTION}' AS ducklake (DATA_PATH '${DATA_PATH}/me
 statement ok
 use ducklake
 
-# Create one Table with two files
+# Create one Table with two files - insert 11 rows to bypass inlining
 statement ok
 CREATE TABLE example (key VARCHAR, value VARCHAR);
 
 statement ok
-INSERT INTO example (key, value) VALUES ('foo', 'bar');
+INSERT INTO example SELECT 'foo' || i::VARCHAR, 'bar' || i::VARCHAR FROM range(11) t(i);
 
 statement ok
-INSERT INTO example (key, value) VALUES ('baz', 'qux');
+INSERT INTO example SELECT 'baz' || i::VARCHAR, 'qux' || i::VARCHAR FROM range(11) t(i);
 
 # Create another Table with two files
 statement ok
 CREATE TABLE example_2 (key VARCHAR, value VARCHAR);
 
 statement ok
-INSERT INTO example_2 (key, value) VALUES ('foo', 'bar');
+INSERT INTO example_2 SELECT 'foo' || i::VARCHAR, 'bar' || i::VARCHAR FROM range(11) t(i);
 
 statement ok
-INSERT INTO example_2 (key, value) VALUES ('baz', 'qux');
+INSERT INTO example_2 SELECT 'baz' || i::VARCHAR, 'qux' || i::VARCHAR FROM range(11) t(i);
 
 # Different schema with another table with two files
 statement ok
@@ -44,28 +44,28 @@ statement ok
 CREATE TABLE s1.example (key VARCHAR, value VARCHAR);
 
 statement ok
-INSERT INTO s1.example (key, value) VALUES ('foo', 'bar');
+INSERT INTO s1.example SELECT 'foo' || i::VARCHAR, 'bar' || i::VARCHAR FROM range(11) t(i);
 
 statement ok
-INSERT INTO s1.example (key, value) VALUES ('baz', 'qux');
+INSERT INTO s1.example SELECT 'baz' || i::VARCHAR, 'qux' || i::VARCHAR FROM range(11) t(i);
 
 statement ok
 CREATE TABLE s1.example_2 (key VARCHAR, value VARCHAR);
 
 statement ok
-INSERT INTO s1.example_2 (key, value) VALUES ('foo', 'bar');
+INSERT INTO s1.example_2 SELECT 'foo' || i::VARCHAR, 'bar' || i::VARCHAR FROM range(11) t(i);
 
 statement ok
-INSERT INTO s1.example_2 (key, value) VALUES ('baz', 'qux');
+INSERT INTO s1.example_2 SELECT 'baz' || i::VARCHAR, 'qux' || i::VARCHAR FROM range(11) t(i);
 
 statement ok
 CREATE TABLE s1.example_3 (key VARCHAR, value VARCHAR);
 
 statement ok
-INSERT INTO s1.example_3 (key, value) VALUES ('foo', 'bar');
+INSERT INTO s1.example_3 SELECT 'foo' || i::VARCHAR, 'bar' || i::VARCHAR FROM range(11) t(i);
 
 statement ok
-INSERT INTO s1.example_3 (key, value) VALUES ('baz', 'qux');
+INSERT INTO s1.example_3 SELECT 'baz' || i::VARCHAR, 'qux' || i::VARCHAR FROM range(11) t(i);
 
 query II
 SELECT data_file_id, table_id FROM __ducklake_metadata_ducklake.ducklake_data_file
@@ -99,7 +99,7 @@ CALL ducklake_merge_adjacent_files('ducklake');
 
 # We can set specific tables to be merged
 query II
-SELECT data_file_id, table_id FROM __ducklake_metadata_ducklake.ducklake_data_file
+SELECT data_file_id, table_id FROM __ducklake_metadata_ducklake.ducklake_data_file ORDER BY data_file_id
 ----
 0	1
 1	1
@@ -118,7 +118,7 @@ statement ok
 CALL ducklake_merge_adjacent_files('ducklake');
 
 query II
-SELECT data_file_id, table_id FROM __ducklake_metadata_ducklake.ducklake_data_file
+SELECT data_file_id, table_id FROM __ducklake_metadata_ducklake.ducklake_data_file ORDER BY data_file_id
 ----
 0	1
 1	1

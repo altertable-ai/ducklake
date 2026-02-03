@@ -146,32 +146,37 @@ select count(*) from test;
 170
 
 query I
-select count(*) from test AT (VERSION => 5);
+select count(*) from test AT (VERSION => 2);
+----
+100
+
+query I
+select count(*) from test AT (VERSION => 3);
 ----
 50
 
 query I
-select count(*) from test AT (VERSION => 7);
+select count(*) from test AT (VERSION => 4);
 ----
 150
 
 query I
-select count(*) from test AT (VERSION => 9);
+select count(*) from test AT (VERSION => 5);
 ----
 120
 
 query I
-select count(*) from test AT (VERSION => 11);
+select count(*) from test AT (VERSION => 6);
 ----
 119
 
 query I
-select count(*) from test AT (VERSION => 13);
+select count(*) from test AT (VERSION => 8);
 ----
 219
 
 query I
-select count(*) from test AT (VERSION => 15);
+select count(*) from test AT (VERSION => 9);
 ----
 170
 

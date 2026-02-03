@@ -39,6 +39,9 @@ statement ok
 INSERT INTO ducklake.test FROM range(10, 12);
 
 statement ok
+CALL ducklake_flush_inlined_data('ducklake')
+
+statement ok
 CALL ducklake_merge_adjacent_files('ducklake');
 
 query II

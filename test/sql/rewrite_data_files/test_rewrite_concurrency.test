@@ -70,24 +70,29 @@ FROM test
 query III
 SELECT data_file_id, begin_snapshot, end_snapshot FROM ducklake_metadata.ducklake_data_file
 ----
-1	2	8
-3	8	NULL
+0	2	7
+4	7	NULL
 
 # Lets time travel
 query I
-SELECT count(*) FROM test AT (VERSION => 3)
+SELECT count(*) FROM test AT (VERSION => 2)
 ----
 100
 
 query I
-SELECT count(*) FROM test AT (VERSION => 4)
+SELECT count(*) FROM test AT (VERSION => 3)
 ----
 61
 
 query I
-SELECT count(*) FROM test AT (VERSION => 5)
+SELECT count(*) FROM test AT (VERSION => 4)
 ----
 52
+
+query I
+SELECT count(*) FROM test AT (VERSION => 5)
+----
+3
 
 query I
 SELECT count(*) FROM test AT (VERSION => 6)
@@ -99,19 +104,14 @@ SELECT count(*) FROM test AT (VERSION => 7)
 ----
 3
 
-query I
-SELECT count(*) FROM test AT (VERSION => 8)
-----
-3
-
 # With inlining, deletion files are handled differently
 query I
 SELECT COUNT(*) FROM ducklake_metadata.ducklake_files_scheduled_for_deletion
 ----
-0
+2
 
-# We have one file from snapshots 4 - 8, as we written a new data file in 8
+# We have one file from snapshots 3 - 7, as we written a new data file in 7
 query II
 SELECT begin_snapshot, end_snapshot FROM ducklake_metadata.ducklake_delete_file ORDER BY ALL
 ----
-4	8
+3	7

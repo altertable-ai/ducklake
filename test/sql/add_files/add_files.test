@@ -20,6 +20,9 @@ CREATE TABLE ducklake.test(col1 INTEGER, col2 VARCHAR);
 statement ok
 INSERT INTO ducklake.test VALUES (100, 'hello');
 
+statement ok
+CALL ducklake_flush_inlined_data('ducklake')
+
 # write a parquet file outside of DuckLake
 statement ok
 COPY (SELECT 200 col1, 'world' col2) TO '${DATA_PATH}/ducklake_add_files/main/test/my_file.parquet';
@@ -126,7 +129,7 @@ FROM ducklake.test
 
 # schema-level time travel works, also on files we added here
 query III
-FROM ducklake.test AT (VERSION => 6)
+FROM ducklake.test AT (VERSION => 7)
 ----
 100	hello	NULL
 200	world	NULL
@@ -170,7 +173,7 @@ SELECT col1, col2, col3 FROM ducklake.test
 
 # time travel still works
 query III
-FROM ducklake.test AT (VERSION => 6)
+FROM ducklake.test AT (VERSION => 7)
 ----
 100	hello	NULL
 200	world	NULL

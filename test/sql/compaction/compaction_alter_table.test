@@ -14,65 +14,97 @@ test-env DATA_PATH __TEST_DIR__
 statement ok
 ATTACH 'ducklake:${DUCKLAKE_CONNECTION}' AS ducklake (DATA_PATH '${DATA_PATH}/ducklake_compaction_alter_files')
 
-# snapshot 1
+# snapshot 1 (create)
 statement ok
 CREATE TABLE ducklake.test(id INTEGER, i INTEGER);
 
-# snapshot 2
+# snapshot 2 (inlined_insert)
 statement ok
 INSERT INTO ducklake.test VALUES (1, 10);
 
-# snapshot 3
+# snapshot 3 (flushed_inlined)
+statement ok
+CALL ducklake_flush_inlined_data('ducklake')
+
+# snapshot 4 (inlined_insert)
 statement ok
 INSERT INTO ducklake.test VALUES (2, 20);
 
-# snapshot 4
+# snapshot 5 (flushed_inlined)
+statement ok
+CALL ducklake_flush_inlined_data('ducklake')
+
+# snapshot 6 (alter)
 statement ok
 ALTER TABLE ducklake.test ADD COLUMN j INTEGER
 
-# snapshot 5
+# snapshot 7 (inlined_insert)
 statement ok
 INSERT INTO ducklake.test VALUES (3, 30, 300);
 
-# snapshot 6
+# snapshot 8 (flushed_inlined)
+statement ok
+CALL ducklake_flush_inlined_data('ducklake')
+
+# snapshot 9 (inlined_insert)
 statement ok
 INSERT INTO ducklake.test VALUES (4, 40, 400);
 
-# snapshot 7
+# snapshot 10 (flushed_inlined)
+statement ok
+CALL ducklake_flush_inlined_data('ducklake')
+
+# snapshot 11 (alter)
 statement ok
 ALTER TABLE ducklake.test DROP COLUMN i
 
-# snapshot 8
+# snapshot 12 (inlined_insert)
 statement ok
 INSERT INTO ducklake.test VALUES (5, 500);
 
-# snapshot 9
+# snapshot 13 (flushed_inlined)
+statement ok
+CALL ducklake_flush_inlined_data('ducklake')
+
+# snapshot 14 (inlined_insert)
 statement ok
 INSERT INTO ducklake.test VALUES (6, 600);
 
-# snapshot 10
+# snapshot 15 (flushed_inlined)
+statement ok
+CALL ducklake_flush_inlined_data('ducklake')
+
+# snapshot 16 (alter)
 statement ok
 ALTER TABLE ducklake.test ADD COLUMN i VARCHAR
 
-# snapshot 11
+# snapshot 17 (inlined_insert)
 statement ok
 INSERT INTO ducklake.test VALUES (7, 700, 'hello');
 
-# snapshot 12
+# snapshot 18 (flushed_inlined)
+statement ok
+CALL ducklake_flush_inlined_data('ducklake')
+
+# snapshot 19 (inlined_insert)
 statement ok
 INSERT INTO ducklake.test VALUES (8, 800, 'world');
+
+# snapshot 20 (flushed_inlined)
+statement ok
+CALL ducklake_flush_inlined_data('ducklake')
 
 query IIIII
 SELECT snapshot_id, rowid, * FROM ducklake.test ORDER BY ALL
 ----
 2	0	1	NULL	NULL
-3	1	2	NULL	NULL
-5	2	3	300	NULL
-6	3	4	400	NULL
-8	4	5	500	NULL
-9	5	6	600	NULL
-11	6	7	700	hello
-12	7	8	800	world
+4	1	2	NULL	NULL
+7	2	3	300	NULL
+9	3	4	400	NULL
+12	4	5	500	NULL
+14	5	6	600	NULL
+17	6	7	700	hello
+19	7	8	800	world
 
 query I
 SELECT COUNT(*) FROM GLOB('${DATA_PATH}/ducklake_compaction_alter_files/**/*')
@@ -99,38 +131,47 @@ SELECT COUNT(*) FROM GLOB('${DATA_PATH}/ducklake_compaction_alter_files/**/*')
 
 # verify correct behavior when operating on the compacted file
 # time travel
+# VERSION => 5 has snapshots 1-5: create(1), insert(2), flush(3), insert(4), flush(5)
+# Schema is (id, i) - no j column yet
 query IIII
-SELECT snapshot_id, rowid, * FROM ducklake.test AT (VERSION => 3) ORDER BY ALL
+SELECT snapshot_id, rowid, * FROM ducklake.test AT (VERSION => 5) ORDER BY ALL
 ----
-2	0	1	10
-3	1	2	20
+2	1	1	10
+4	2	2	20
 
+# VERSION => 10 has snapshots 1-10
+# Schema after alter(6) is (id, i, j)
+# Rows: insert(2), insert(4), insert(7), insert(9)
 query IIIII
-SELECT snapshot_id, rowid, * FROM ducklake.test AT (VERSION => 6) ORDER BY ALL
+SELECT snapshot_id, rowid, * FROM ducklake.test AT (VERSION => 10) ORDER BY ALL
 ----
-2	0	1	10	NULL
-3	1	2	20	NULL
-5	2	3	30	300
-6	3	4	40	400
+2	1	1	10	NULL
+4	2	2	20	NULL
+7	3	3	30	300
+9	4	4	40	400
 
+# VERSION => 15 has snapshots 1-15
+# Schema after alter(11) is (id, j) - i column dropped
+# Rows: insert(2), insert(4), insert(7), insert(9), insert(12), insert(14)
 query IIII
-SELECT snapshot_id, rowid, * FROM ducklake.test AT (VERSION => 9) ORDER BY ALL
+SELECT snapshot_id, rowid, * FROM ducklake.test AT (VERSION => 15) ORDER BY ALL
 ----
-2	0	1	NULL
-3	1	2	NULL
-5	2	3	300
-6	3	4	400
-8	4	5	500
-9	5	6	600
+2	1	1	NULL
+4	2	2	NULL
+7	3	3	300
+9	4	4	400
+12	5	5	500
+14	6	6	600
 
+# Current state (rowids are now 1-based after compaction)
 query IIIII
 SELECT snapshot_id, rowid, * FROM ducklake.test ORDER BY ALL
 ----
-2	0	1	NULL	NULL
-3	1	2	NULL	NULL
-5	2	3	300	NULL
-6	3	4	400	NULL
-8	4	5	500	NULL
-9	5	6	600	NULL
-11	6	7	700	hello
-12	7	8	800	world
+2	1	1	NULL	NULL
+4	2	2	NULL	NULL
+7	3	3	300	NULL
+9	4	4	400	NULL
+12	5	5	500	NULL
+14	6	6	600	NULL
+17	7	7	700	hello
+19	8	8	800	world

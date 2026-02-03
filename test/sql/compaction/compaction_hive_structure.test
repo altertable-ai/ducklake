@@ -11,7 +11,7 @@ test-env DUCKLAKE_CONNECTION __TEST_DIR__/{UUID}.db
 test-env DATA_PATH __TEST_DIR__
 
 
-# Disable inlining - this test has table renames which have bugs with inlined data
+# This test has table renames - insert >10 rows to bypass inlining (known bug with rename + inlined data)
 statement ok
 ATTACH 'ducklake:${DUCKLAKE_CONNECTION}' AS ducklake (DATA_PATH '${DATA_PATH}/ducklake_compaction_hive')
 
@@ -48,6 +48,9 @@ INSERT INTO sales
       (6, 'Product B', 150.0, '2023-07-02');
 
 statement ok
+CALL ducklake_flush_inlined_data('ducklake')
+
+statement ok
 CALL merge_adjacent_files();
 
 statement ok
@@ -68,6 +71,7 @@ FROM sales
 5	Product C	300.0	2023-07-02
 6	Product B	150.0	2023-07-02
 
+# Insert >10 rows to bypass inlining (workaround for known bug with rename + inlined data)
 statement ok
 CREATE TABLE test_table AS SELECT 1 as partition_col, random() as value LIMIT 0;
 
@@ -75,10 +79,10 @@ statement ok
 ALTER TABLE test_table SET PARTITIONED BY (partition_col);
 
 statement ok
-INSERT INTO test_table SELECT 1 as partition_col, random() as value;
+INSERT INTO test_table SELECT 1 as partition_col, random() as value FROM range(15);
 
 statement ok
-INSERT INTO test_table SELECT 2 as partition_col, random() as value;
+INSERT INTO test_table SELECT 2 as partition_col, random() as value FROM range(15);
 
 query I
 SELECT count(*) FROM ducklake_list_files('ducklake', 'test_table') where data_file like '%partition_col%'
@@ -89,7 +93,7 @@ statement ok
 ALTER TABLE test_table RENAME TO test_table_renamed;
 
 statement ok
-INSERT INTO test_table_renamed SELECT 2 as partition_col, random() as value;
+INSERT INTO test_table_renamed SELECT 2 as partition_col, random() as value FROM range(15);
 
 query I
 SELECT count(*)  FROM ducklake_list_files('ducklake', 'test_table_renamed') where data_file like '%partition_col%';

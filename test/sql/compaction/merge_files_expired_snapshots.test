@@ -20,11 +20,12 @@ USE ducklake;
 statement ok
 CREATE TABLE example (key VARCHAR, value VARCHAR);
 
+# With 15 rows, files are created directly
 statement ok
-INSERT INTO example (key, value) VALUES ('foo', 'bar');
+INSERT INTO example SELECT 'foo' || i, 'bar' || i FROM range(15) t(i);
 
 statement ok
-INSERT INTO example (key, value) VALUES ('baz', 'qux');
+INSERT INTO example SELECT 'baz' || i, 'qux' || i FROM range(15) t(i);
 
 query II
 SELECT snapshot_id, changes FROM snapshots();
@@ -56,32 +57,34 @@ SELECT count(*) FROM ducklake_list_files('ducklake', 'example');
 1
 
 query II
-FROM example
+FROM example ORDER BY key LIMIT 4
 ----
-foo	bar
-baz	qux
+baz0	qux0
+baz1	qux1
+baz10	qux10
+baz11	qux11
 
 # Add a few schema changes
 statement ok
-INSERT INTO example (key, value) VALUES ('a', 'b');
+INSERT INTO example SELECT 'a' || i, 'b' || i FROM range(15) t(i);
 
 statement ok
 ALTER TABLE example ADD COLUMN j INTEGER
 
 statement ok
-INSERT INTO example VALUES ('c', 'd', 1);
+INSERT INTO example SELECT 'c' || i, 'd' || i, i FROM range(15) t(i);
 
 statement ok
-INSERT INTO example VALUES ('e', 'f', 2);
+INSERT INTO example SELECT 'e' || i, 'f' || i, i+15 FROM range(15) t(i);
 
 statement ok
 ALTER TABLE example DROP COLUMN key
 
 statement ok
-INSERT INTO example VALUES ('k', 3);
+INSERT INTO example SELECT 'k' || i, i+30 FROM range(15) t(i);
 
 statement ok
-INSERT INTO example VALUES ('f', 9);
+INSERT INTO example SELECT 'ff' || i, i+45 FROM range(15) t(i);
 
 query I
 SELECT count(*) FROM ducklake_list_files('ducklake', 'example');
@@ -104,7 +107,7 @@ SELECT snapshot_id, changes FROM snapshots();
 
 
 statement ok
-CALL ducklake_expire_snapshots('ducklake', versions => [5,6,7,8]);
+CALL ducklake_expire_snapshots('ducklake', versions => [5,6,7,8,9,10]);
 
 query I
 SELECT count(*) FROM ducklake_list_files('ducklake', 'example');
@@ -121,12 +124,15 @@ SELECT count(*) FROM ducklake_list_files('ducklake', 'example');
 3
 
 query II
-FROM example ORDER BY ALL
+FROM example ORDER BY ALL LIMIT 10
 ----
-b	NULL
-bar	NULL
-d	1
-f	2
-f	9
-k	3
-qux	NULL
+b0	NULL
+b1	NULL
+b10	NULL
+b11	NULL
+b12	NULL
+b13	NULL
+b14	NULL
+b2	NULL
+b3	NULL
+b4	NULL

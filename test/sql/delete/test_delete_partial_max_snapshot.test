@@ -24,6 +24,9 @@ statement ok
 insert into test values (11),(12),(13);
 
 statement ok
+CALL ducklake_flush_inlined_data('ducklake')
+
+statement ok
 delete from test where id = 1
 
 statement ok
@@ -32,8 +35,10 @@ delete from test where id = 5
 statement ok
 delete from test where id = 12
 
+statement ok
+CALL ducklake_flush_inlined_data('ducklake')
+
 query I
 SELECT partial_max FROM __ducklake_metadata_ducklake.ducklake_delete_file
 ----
-4
-NULL
+6

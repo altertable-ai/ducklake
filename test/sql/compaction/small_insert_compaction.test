@@ -25,43 +25,63 @@ CREATE TABLE ducklake.test(i INTEGER);
 statement ok
 CREATE TABLE ducklake.test2(i INTEGER);
 
-# snapshot 3
+# snapshot 3, flush 4
 statement ok
 INSERT INTO ducklake.test VALUES (1);
 
-# snapshot 4: random change that does not modify the "test" table
+statement ok
+CALL ducklake_flush_inlined_data('ducklake')
+
+# snapshot 5, flush 6: random change that does not modify the "test" table
 statement ok
 INSERT INTO ducklake.test2 VALUES (42);
 
-# snapshot 5
+statement ok
+CALL ducklake_flush_inlined_data('ducklake')
+
+# snapshot 7, flush 8
 statement ok
 INSERT INTO ducklake.test VALUES (2);
 
-# snapshot 6
+statement ok
+CALL ducklake_flush_inlined_data('ducklake')
+
+# snapshot 9, flush 10
 statement ok
 INSERT INTO ducklake.test VALUES (3);
 
-# snapshot 7
+statement ok
+CALL ducklake_flush_inlined_data('ducklake')
+
+# snapshot 11, flush 12
 statement ok
 INSERT INTO ducklake.test VALUES (4);
 
-# snapshot 8
+statement ok
+CALL ducklake_flush_inlined_data('ducklake')
+
+# snapshot 13, flush 14
 statement ok
 INSERT INTO ducklake.test VALUES (5);
+
+statement ok
+CALL ducklake_flush_inlined_data('ducklake')
 
 query I
 SELECT COUNT(*) FROM GLOB('${DATA_PATH}/ducklake_compaction_files/**/*')
 ----
 6
 
+# Row snapshot_ids correspond to inlined_insert (odd: 3, 7, 9, 11, 13)
+# not flushed_inlined (even: 4, 8, 10, 12, 14)
 query III
 SELECT snapshot_id, rowid, * FROM ducklake.test ORDER BY ALL
 ----
 3	0	1
-5	1	2
-6	2	3
-7	3	4
-8	4	5
+7	1	2
+9	2	3
+11	3	4
+13	4	5
 
 statement ok
 CALL ducklake.merge_adjacent_files();
@@ -101,55 +121,56 @@ SELECT COUNT(*) FROM GLOB('${DATA_PATH}/ducklake_compaction_files/**/*')
 # verify correct behavior when operating on the compacted file
 # time travel
 query I
-SELECT * FROM ducklake.test AT (VERSION => 3)
-----
-1
-
-query I
 SELECT * FROM ducklake.test AT (VERSION => 4)
 ----
 1
 
+query I
+SELECT * FROM ducklake.test AT (VERSION => 6)
+----
+1
+
 
 query I
-SELECT * FROM ducklake.test AT (VERSION => 5) ORDER BY ALL
+SELECT * FROM ducklake.test AT (VERSION => 8) ORDER BY ALL
 ----
 1
 2
 
 # reading snapshot id and row id
+# After compaction, rowids start at 1 (they get compacted)
 query III
 SELECT snapshot_id, rowid, * FROM ducklake.test ORDER BY ALL
 ----
-3	0	1
-5	1	2
-6	2	3
-7	3	4
-8	4	5
+3	1	1
+7	2	2
+9	3	3
+11	4	4
+13	5	5
 
 # table insertions function
 query II
-SELECT rowid, * FROM ducklake_table_insertions('ducklake', 'main', 'test', 0, 3) ORDER BY ALL
-----
-0	1
-
-query II
 SELECT rowid, * FROM ducklake_table_insertions('ducklake', 'main', 'test', 0, 4) ORDER BY ALL
 ----
-0	1
+1	1
 
 query II
 SELECT rowid, * FROM ducklake_table_insertions('ducklake', 'main', 'test', 0, 6) ORDER BY ALL
 ----
-0	1
-1	2
-2	3
+1	1
 
 query II
-SELECT rowid, * FROM ducklake_table_insertions('ducklake', 'main', 'test', 0, 9) ORDER BY ALL
+SELECT rowid, * FROM ducklake_table_insertions('ducklake', 'main', 'test', 0, 10) ORDER BY ALL
 ----
-0	1
-1	2
-2	3
-3	4
-4	5
+1	1
+2	2
+3	3
+
+query II
+SELECT rowid, * FROM ducklake_table_insertions('ducklake', 'main', 'test', 0, 15) ORDER BY ALL
+----
+1	1
+2	2
+3	3
+4	4
+5	5

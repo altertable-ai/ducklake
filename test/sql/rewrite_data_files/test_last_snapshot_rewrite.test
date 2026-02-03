@@ -24,6 +24,9 @@ CREATE TABLE test(key INTEGER, values VARCHAR);
 statement ok
 INSERT INTO test SELECT i, concat('thisisastring_', i) FROM range(10000) t(i)
 
+statement ok
+CALL ducklake_flush_inlined_data('ducklake')
+
 # Let's do three rounds of deletions
 statement ok
 DELETE FROM test
@@ -47,10 +50,9 @@ SELECT snapshot_id, changes FROM snapshots();
 0	{schemas_created=[main]}
 1	{tables_created=[main.test]}
 2	{tables_inserted_into=[1]}
-3	{inlined_delete=[1]}
-4	{inlined_delete=[1]}
+3	{tables_deleted_from=[1]}
+4	{tables_deleted_from=[1]}
 5	{tables_deleted_from=[1]}
-6	{tables_deleted_from=[1]}
 
 query I
 SELECT delete_file is not null FROM ducklake_list_files('ducklake', 'test')
@@ -60,7 +62,7 @@ True
 query I
 SELECT delete_file_id FROM ducklake_metadata.ducklake_delete_file
 ----
-2
+3
 
 # This won't do much, since our default threshold is too high
 statement ok
@@ -69,7 +71,7 @@ CALL ducklake_rewrite_data_files('ducklake', 'test');
 query I
 SELECT delete_file_id FROM ducklake_metadata.ducklake_delete_file
 ----
-2
+3
 
 statement ok
 CALL ducklake_rewrite_data_files('ducklake', 'test', delete_threshold => 0.5);
@@ -78,7 +80,7 @@ CALL ducklake_rewrite_data_files('ducklake', 'test', delete_threshold => 0.5);
 query I
 SELECT delete_file_id FROM ducklake_metadata.ducklake_delete_file
 ----
-2
+3
 
 query I
 SELECT COUNT(*) from test
@@ -100,8 +102,8 @@ CALL ducklake_flush_inlined_data('ducklake')
 query I
 SELECT delete_file_id FROM ducklake_metadata.ducklake_delete_file
 ----
-2
-4
+3
+5
 
 statement ok
 CALL ducklake_rewrite_data_files('ducklake', 'test');
@@ -109,8 +111,8 @@ CALL ducklake_rewrite_data_files('ducklake', 'test');
 query I
 SELECT delete_file_id FROM ducklake_metadata.ducklake_delete_file
 ----
-2
-4
+3
+5
 
 query I
 SELECT COUNT(*) from test
@@ -131,9 +133,9 @@ CALL ducklake_rewrite_data_files('ducklake', 'test');
 query I
 SELECT delete_file_id FROM ducklake_metadata.ducklake_delete_file
 ----
-2
-4
-6
+3
+5
+7
 
 # Test that a manual delete_threshold option has priority over the global value.
 statement ok
@@ -155,7 +157,7 @@ The rewrite_delete_threshold must be between 0 and 1
 query I
 SELECT COUNT(*) FROM GLOB('${DATA_PATH}/ducklake_rewrite_data/**/*')
 ----
-8
+9
 
 # delete the old files
 statement ok
@@ -174,17 +176,20 @@ SELECT snapshot_id, changes FROM snapshots();
 0	{schemas_created=[main]}
 1	{tables_created=[main.test]}
 2	{tables_inserted_into=[1]}
-3	{inlined_delete=[1]}
-4	{inlined_delete=[1]}
+3	{tables_deleted_from=[1]}
+4	{tables_deleted_from=[1]}
 5	{tables_deleted_from=[1]}
-6	{tables_deleted_from=[1]}
-7	{rewrite_delete=[1]}
-8	{inlined_delete=[1]}
-9	{tables_deleted_from=[1]}
-10	{rewrite_delete=[1]}
-11	{inlined_delete=[1]}
-12	{tables_deleted_from=[1]}
-13	{rewrite_delete=[1]}
+6	{rewrite_delete=[1]}
+7	{tables_deleted_from=[1]}
+8	{rewrite_delete=[1]}
+9	{inlined_delete=[1]}
+10	{tables_deleted_from=[1]}
+11	{rewrite_delete=[1]}
+
+query I
+select count(*) from test AT (VERSION => 2);
+----
+10000
 
 query I
 select count(*) from test AT (VERSION => 3);
@@ -209,7 +214,7 @@ select count(*) from test AT (VERSION => 6);
 query I
 select count(*) from test AT (VERSION => 7);
 ----
-4001
+3001
 
 query I
 select count(*) from test AT (VERSION => 8);
@@ -219,25 +224,15 @@ select count(*) from test AT (VERSION => 8);
 query I
 select count(*) from test AT (VERSION => 9);
 ----
-3001
+3000
 
 query I
 select count(*) from test AT (VERSION => 10);
 ----
-3001
+3000
 
 query I
 select count(*) from test AT (VERSION => 11);
-----
-3000
-
-query I
-select count(*) from test AT (VERSION => 12);
-----
-3000
-
-query I
-select count(*) from test AT (VERSION => 13);
 ----
 3000
 
