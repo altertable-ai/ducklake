@@ -1867,7 +1867,17 @@ string DuckLakeMetadataManager::WriteNewInlinedTables(DuckLakeSnapshot commit_sn
 			// not inlining for this table or inlining is for a table on this transaction, hence handled there - skip it
 			continue;
 		}
-		GetInlinedTableQueries(commit_snapshot, table, inlined_tables, inlined_table_queries);
+		// If columns are empty (e.g., for renamed tables), fetch them from the catalog
+		DuckLakeTableInfo table_with_columns = table;
+		if (table_with_columns.columns.empty()) {
+			auto current_snapshot = transaction.GetSnapshot();
+			auto table_entry = catalog.GetEntryById(transaction, current_snapshot, table.id);
+			if (table_entry) {
+				auto &tbl = table_entry->Cast<DuckLakeTableEntry>();
+				table_with_columns.columns = tbl.GetTableColumns();
+			}
+		}
+		GetInlinedTableQueries(commit_snapshot, table_with_columns, inlined_tables, inlined_table_queries);
 	}
 	if (inlined_tables.empty()) {
 		return {};
