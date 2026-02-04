@@ -11,9 +11,10 @@ test-env DUCKLAKE_CONNECTION __TEST_DIR__/{UUID}.db
 test-env DATA_PATH __TEST_DIR__
 
 
-# Disable inlining - this test needs physical files to verify transaction conflict cleanup
+# Disable inlining - this test requires inlining to be set to 0, since we don't flush lines not commited
+# from inlined tables
 statement ok
-ATTACH 'ducklake:${DUCKLAKE_CONNECTION}' AS ducklake (DATA_PATH '${DATA_PATH}/ducklake_files_conflict_cleanup')
+ATTACH 'ducklake:${DUCKLAKE_CONNECTION}' AS ducklake (DATA_PATH '${DATA_PATH}/ducklake_files_conflict_cleanup', DATA_INLINING_ROW_LIMIT 0)
 
 statement ok
 SET immediate_transaction_mode=true
