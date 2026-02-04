@@ -4,7 +4,9 @@
 #include "storage/ducklake_transaction_changes.hpp"
 #include "duckdb/catalog/catalog_entry/table_catalog_entry.hpp"
 #include "storage/ducklake_scan.hpp"
+#include "storage/ducklake_multi_file_list.hpp"
 #include "duckdb/planner/tableref/bound_at_clause.hpp"
+#include "duckdb/common/multi_file/multi_file_function.hpp"
 
 namespace duckdb {
 
@@ -60,6 +62,13 @@ static unique_ptr<FunctionData> DuckLakeTableChangesBind(ClientContext &context,
 	function_info.start_snapshot =
 	    make_uniq<DuckLakeSnapshot>(transaction.GetSnapshot(start_at_clause, SnapshotBound::LOWER_BOUND));
 	function_info.scan_type = scan_type;
+
+	// Preload the file list to avoid metadata queries during parallel execution
+	// This prevents potential deadlocks between the metadata connection and DuckDB's thread pool
+	// auto &multi_file_bind_data = bind_data->Cast<MultiFileBindData>();
+	// auto &file_list = multi_file_bind_data.file_list->Cast<DuckLakeMultiFileList>();
+	// file_list.GetFiles();
+
 	return bind_data;
 }
 

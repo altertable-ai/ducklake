@@ -78,8 +78,8 @@ void DuckLakeTransaction::Rollback() {
 	table_data_changes.clear();
 }
 
-Connection &DuckLakeTransaction::GetConnection() {
-	lock_guard<mutex> lock(connection_lock);
+Connection &DuckLakeTransaction::GetConnectionInternal() {
+	// Must be called with connection_lock held
 	if (!connection) {
 		connection = make_uniq<Connection>(db);
 		// set the search path to the metadata catalog
@@ -93,6 +93,11 @@ Connection &DuckLakeTransaction::GetConnection() {
 		connection->BeginTransaction();
 	}
 	return *connection;
+}
+
+Connection &DuckLakeTransaction::GetConnection() {
+	lock_guard<mutex> lock(connection_lock);
+	return GetConnectionInternal();
 }
 
 bool DuckLakeTransaction::SchemaChangesMade() {
@@ -1898,7 +1903,9 @@ void DuckLakeTransaction::DeleteInlinedData(const DuckLakeInlinedTableInfo &inli
 }
 
 unique_ptr<QueryResult> DuckLakeTransaction::Query(string query) {
-	auto &connection = GetConnection();
+	// Hold the lock for the entire query execution to prevent concurrent queries on the same connection
+	lock_guard<mutex> lock(connection_lock);
+	auto &connection = GetConnectionInternal();
 	auto catalog_identifier = DuckLakeUtil::SQLIdentifierToString(ducklake_catalog.MetadataDatabaseName());
 	auto catalog_literal = DuckLakeUtil::SQLLiteralToString(ducklake_catalog.MetadataDatabaseName());
 	auto schema_identifier = DuckLakeUtil::SQLIdentifierToString(ducklake_catalog.MetadataSchemaName());

@@ -2071,9 +2071,11 @@ WHERE table_id = %d AND schema_version=(
 				row_id++;
 			}
 		}
-		string append_query = StringUtil::Format("INSERT INTO {METADATA_CATALOG}.%s VALUES %s;",
-		                                         SQLIdentifier(inlined_table_name), values);
-		batch_query += append_query;
+		if (!values.empty()) {
+			string append_query = StringUtil::Format("INSERT INTO {METADATA_CATALOG}.%s VALUES %s;",
+			                                         SQLIdentifier(inlined_table_name), values);
+			batch_query += append_query;
+		}
 	}
 	return batch_query;
 }
