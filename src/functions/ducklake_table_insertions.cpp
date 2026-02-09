@@ -65,9 +65,9 @@ static unique_ptr<FunctionData> DuckLakeTableChangesBind(ClientContext &context,
 
 	// Preload the file list to avoid metadata queries during parallel execution
 	// This prevents potential deadlocks between the metadata connection and DuckDB's thread pool
-	// auto &multi_file_bind_data = bind_data->Cast<MultiFileBindData>();
-	// auto &file_list = multi_file_bind_data.file_list->Cast<DuckLakeMultiFileList>();
-	// file_list.GetFiles();
+	auto &multi_file_bind_data = bind_data->Cast<MultiFileBindData>();
+	auto &file_list = multi_file_bind_data.file_list->Cast<DuckLakeMultiFileList>();
+	file_list.GetFiles();
 
 	return bind_data;
 }

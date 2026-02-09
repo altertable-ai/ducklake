@@ -11,6 +11,7 @@
 #include "duckdb/common/multi_file/base_file_reader.hpp"
 #include "storage/ducklake_inlined_data.hpp"
 #include "common/ducklake_snapshot.hpp"
+#include "duckdb/execution/expression_executor.hpp"
 
 namespace duckdb {
 class DuckLakeFieldData;
@@ -48,6 +49,8 @@ private:
 	vector<column_t> scan_column_ids;
 	ColumnDataScanState state;
 	DataChunk scan_chunk;
+	//! Expression executors for expression_map entries, keyed by column_t (from column_ids)
+	unordered_map<column_t, unique_ptr<ExpressionExecutor>> expression_executors;
 };
 
 } // namespace duckdb

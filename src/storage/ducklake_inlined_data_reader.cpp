@@ -31,10 +31,6 @@ bool DuckLakeInlinedDataReader::TryInitializeScan(ClientContext &context, Global
 		}
 		initialized_scan = true;
 	}
-	if (!expression_map.empty()) {
-		throw InternalException("FIXME: support expression_map");
-	}
-
 	if (!data) {
 		// scanning data from a table - read it from the metadata catalog
 		auto transaction = read_info.GetTransaction();
@@ -92,6 +88,12 @@ bool DuckLakeInlinedDataReader::TryInitializeScan(ClientContext &context, Global
 			columns_to_read.push_back(KeywordHelper::WriteOptionallyQuoted("row_id"));
 			virtual_columns.emplace_back(InlinedVirtualColumn::COLUMN_EMPTY);
 		}
+		if (!expression_map.empty() && virtual_columns.empty()) {
+			for (idx_t i = 0; i < columns_to_read.size(); i++) {
+				scan_column_ids.push_back(i);
+				virtual_columns.push_back(InlinedVirtualColumn::NONE);
+			}
+		}
 		switch (read_info.scan_type) {
 		case DuckLakeScanType::SCAN_TABLE:
 			data = metadata_manager.ReadInlinedData(read_info.snapshot, table_name, columns_to_read);
@@ -135,6 +137,9 @@ bool DuckLakeInlinedDataReader::TryInitializeScan(ClientContext &context, Global
 			}
 			filter.delete_data->deleted_rows = std::move(deleted_ordinals);
 		}
+		for (auto &entry : expression_map) {
+			expression_executors[entry.first] = make_uniq<ExpressionExecutor>(context, *entry.second);
+		}
 		data->data->InitializeScan(state);
 	} else {
 		// scanning from transaction-local data - we already have the data
@@ -152,12 +157,17 @@ bool DuckLakeInlinedDataReader::TryInitializeScan(ClientContext &context, Global
 			scan_column_ids.push_back(col_id);
 			virtual_columns.emplace_back(InlinedVirtualColumn::NONE);
 		}
-		if (!scan_types.empty()) {
+		if (!scan_types.empty() || !virtual_columns.empty()) {
+			// add an extra column to scan to determine the cardinality
+			// this is needed even when all columns are virtual (e.g., only rowid)
 			scan_types.push_back(types[0]);
 			scan_column_ids.push_back(0);
 		}
 		scan_chunk.Initialize(context, scan_types);
-
+		// Initialize expression executors for transaction-local data
+		for (auto &entry : expression_map) {
+			expression_executors[entry.first] = make_uniq<ExpressionExecutor>(context, *entry.second);
+		}
 		data->data->InitializeScan(state, scan_column_ids);
 	}
 	return true;
@@ -173,10 +183,43 @@ AsyncResult DuckLakeInlinedDataReader::Scan(ClientContext &context, GlobalTableF
 			switch (virtual_columns[c]) {
 			case InlinedVirtualColumn::NONE: {
 				auto column_id = source_idx++;
+				// Check if this column has an expression to evaluate
+				if (!expression_map.empty() && c < column_ids.size()) {
+					auto local_id = column_ids[MultiFileLocalIndex(c)];
+					auto expr_it = expression_executors.find(local_id);
+					if (expr_it != expression_executors.end()) {
+						// Evaluate expressions
+						DataChunk expr_input;
+						expr_input.Initialize(Allocator::Get(context),
+						                      {scan_chunk.data[column_id].GetType()});
+						expr_input.Reset();
+						expr_input.data[0].Reference(scan_chunk.data[column_id]);
+						expr_input.SetCardinality(scan_chunk.size());
+						expr_it->second->ExecuteExpression(expr_input, chunk.data[c]);
+						break;
+					}
+				}
 				chunk.data[c].Reference(scan_chunk.data[column_id]);
 				break;
 			}
 			case InlinedVirtualColumn::COLUMN_ROW_ID: {
+				// Check if there's an expression to evaluate (e.g., row_id_start + file_row_number)
+				if (!expression_map.empty() && c < column_ids.size()) {
+					auto local_id = column_ids[MultiFileLocalIndex(c)];
+					auto expr_it = expression_executors.find(local_id);
+					if (expr_it != expression_executors.end()) {
+						DataChunk expr_input;
+						expr_input.Initialize(Allocator::Get(context), {LogicalType::BIGINT});
+						expr_input.Reset();
+						auto ordinal_data = FlatVector::GetData<int64_t>(expr_input.data[0]);
+						for (idx_t r = 0; r < scan_chunk.size(); r++) {
+							ordinal_data[r] = NumericCast<int64_t>(file_row_number + r);
+						}
+						expr_input.SetCardinality(scan_chunk.size());
+						expr_it->second->ExecuteExpression(expr_input, chunk.data[c]);
+						continue;
+					}
+				}
 				auto row_id_data = FlatVector::GetData<int64_t>(chunk.data[c]);
 				for (idx_t r = 0; r < scan_chunk.size(); r++) {
 					row_id_data[r] = NumericCast<int64_t>(file_row_number + r);
