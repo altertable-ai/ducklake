@@ -53,21 +53,16 @@ ORDER BY
     i DESC
 ;
 
-# Flush fails because of the renamed columns - SORTED BY references old column names
-# (With inlining, the error now happens at flush time instead of at merge_adjacent_files time)
+# Compaction should fail because the sort columns no longer exist
 statement error
-CALL ducklake_flush_inlined_data('ducklake')
+CALL ducklake_merge_adjacent_files('ducklake', 'renamed_columns_test');
 ----
 Binder Error: Columns in the SET SORTED BY statement were not found in the DuckLake table. Unmatched columns were: sort_key_1, sort_key_2
 
-# Fix the SORTED BY settings to use new column names
 statement ok
 ALTER TABLE ducklake.renamed_columns_test SET SORTED BY (sort_key_1_changed ASC NULLS LAST, sort_key_2_changed ASC NULLS LAST);
 
-# Now flush should work
-statement ok
-CALL ducklake_flush_inlined_data('ducklake')
-
-# Compaction should also work now
-statement ok
-CALL ducklake_merge_adjacent_files('ducklake', 'renamed_columns_test');
+query III
+SELECT table_name, files_processed, files_created FROM ducklake_merge_adjacent_files('ducklake', 'renamed_columns_test')
+----
+renamed_columns_test	2	1

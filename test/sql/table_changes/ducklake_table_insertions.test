@@ -22,27 +22,38 @@ CREATE TABLE ducklake.test(i INTEGER);
 statement ok
 INSERT INTO ducklake.test VALUES (1);
 
+statement ok
+CALL ducklake_flush_inlined_data('ducklake')
+
 # snapshot 3
 statement ok
 INSERT INTO ducklake.test VALUES (2);
+
+statement ok
+CALL ducklake_flush_inlined_data('ducklake')
 
 # snapshot 4
 statement ok
 INSERT INTO ducklake.test VALUES (3);
 
+statement ok
+CALL ducklake_flush_inlined_data('ducklake')
+
 # snapshot 5
 statement ok
 INSERT INTO ducklake.test VALUES (NULL);
+
+statement ok
+CALL ducklake_flush_inlined_data('ducklake')
 
 # snapshot 6
 statement ok
 INSERT INTO ducklake.test FROM range(10, 12);
 
-statement ok
-CALL ducklake_flush_inlined_data('ducklake')
-
-statement ok
-CALL ducklake_merge_adjacent_files('ducklake');
+query III
+SELECT table_name, files_processed, files_created FROM ducklake_merge_adjacent_files('ducklake')
+----
+test	5	1
 
 query II
 SELECT rowid, * FROM ducklake_table_insertions('ducklake', 'main', 'test', 0, 2);

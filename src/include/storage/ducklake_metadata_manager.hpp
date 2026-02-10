@@ -89,6 +89,7 @@ struct FilterPushdownInfo {
 struct FilterPushdownQueryComponents {
 	string cte_section;
 	string where_clause;
+	string order_by_clause;
 };
 
 //! The DuckLake metadata manger is the communication layer between the system and the metadata catalog
@@ -96,6 +97,9 @@ class DuckLakeMetadataManager {
 public:
 	explicit DuckLakeMetadataManager(DuckLakeTransaction &transaction);
 	virtual ~DuckLakeMetadataManager();
+
+	typedef unique_ptr<DuckLakeMetadataManager> (*create_t)(DuckLakeTransaction &transaction);
+	static void Register(const string &name, create_t);
 
 	static unique_ptr<DuckLakeMetadataManager> Create(DuckLakeTransaction &transaction);
 
@@ -129,6 +133,8 @@ public:
 	                                                                  DuckLakeSnapshot snapshot,
 	                                                                  DuckLakeFileSizeOptions options);
 	virtual idx_t GetBeginSnapshotForTable(TableIndex table_id);
+	virtual idx_t GetNetDataFileRowCount(TableIndex table_id, DuckLakeSnapshot snapshot);
+	virtual idx_t GetNetInlinedRowCount(const string &inlined_table_name, DuckLakeSnapshot snapshot);
 	virtual vector<DuckLakeFileForCleanup> GetOldFilesForCleanup(const string &filter);
 	virtual vector<DuckLakeFileForCleanup> GetOrphanFilesForCleanup(const string &filter, const string &separator);
 	virtual vector<DuckLakeFileForCleanup> GetFilesForCleanup(const string &filter, CleanupType type,
@@ -226,6 +232,17 @@ public:
 protected:
 	virtual string GetLatestSnapshotQuery() const;
 
+	//! Wrap field selections with list aggregation of struct objects (DBMS-specific)
+	//! For DuckDB: LIST({'key1': val1, 'key2': val2, ...})
+	//! For Postgres: jsonb_agg(jsonb_build_object('key1', val1, 'key2', val2, ...))
+	virtual string ListAggregation(const vector<pair<string, string>> &fields) const;
+	//! Parse tag list from ListAggregation value
+	virtual vector<DuckLakeTag> LoadTags(const Value &tag_map) const;
+	//! Parse inlined data tables list from ListAggregation value
+	virtual vector<DuckLakeInlinedTableInfo> LoadInlinedDataTables(const Value &list) const;
+	//! Parse macro implementations list from ListAggregation value
+	virtual vector<DuckLakeMacroImplementation> LoadMacroImplementations(const Value &list) const;
+
 protected:
 	string GetInlinedTableQuery(const DuckLakeTableInfo &table, const string &table_name);
 	string GetColumnType(const DuckLakeColumnInfo &col);
@@ -277,6 +294,10 @@ public:
 	map<idx_t, set<idx_t>> ReadInlinedFileDeletions(TableIndex table_id, DuckLakeSnapshot snapshot);
 
 private:
+	unordered_map<idx_t, string> inlined_table_name_cache;
+	static unordered_map<string /* name */, create_t> metadata_managers;
+	static mutex metadata_managers_lock;
+
 	//! Check which file IDs have inlined deletions (returns set of file IDs that have deletions)
 	unordered_set<idx_t> GetFileIdsWithInlinedDeletions(TableIndex table_id, DuckLakeSnapshot snapshot,
 	                                                    const vector<idx_t> &file_ids);

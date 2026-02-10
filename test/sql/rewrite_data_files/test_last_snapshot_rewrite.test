@@ -24,9 +24,6 @@ CREATE TABLE test(key INTEGER, values VARCHAR);
 statement ok
 INSERT INTO test SELECT i, concat('thisisastring_', i) FROM range(10000) t(i)
 
-statement ok
-CALL ducklake_flush_inlined_data('ducklake')
-
 # Let's do three rounds of deletions
 statement ok
 DELETE FROM test
@@ -39,10 +36,6 @@ WHERE key > 9000;
 statement ok
 DELETE FROM test
 WHERE key > 5000;
-
-# flush to create one combined delete file
-statement ok
-CALL ducklake_flush_inlined_data('ducklake')
 
 query II
 SELECT snapshot_id, changes FROM snapshots();
@@ -65,16 +58,19 @@ SELECT delete_file_id FROM ducklake_metadata.ducklake_delete_file
 3
 
 # This won't do much, since our default threshold is too high
-statement ok
-CALL ducklake_rewrite_data_files('ducklake', 'test');
+query III
+SELECT table_name, files_processed, files_created FROM ducklake_rewrite_data_files('ducklake', 'test')
+----
 
 query I
 SELECT delete_file_id FROM ducklake_metadata.ducklake_delete_file
 ----
 3
 
-statement ok
-CALL ducklake_rewrite_data_files('ducklake', 'test', delete_threshold => 0.5);
+query III
+SELECT table_name, files_processed, files_created FROM ducklake_rewrite_data_files('ducklake', 'test', delete_threshold => 0.5)
+----
+test	1	1
 
 # We are deleting more than one file, so we can get it out
 query I
@@ -95,18 +91,16 @@ statement ok
 DELETE FROM test
 WHERE key > 4000;
 
-# flush to create delete file
-statement ok
-CALL ducklake_flush_inlined_data('ducklake')
-
 query I
 SELECT delete_file_id FROM ducklake_metadata.ducklake_delete_file
 ----
 3
 5
 
-statement ok
-CALL ducklake_rewrite_data_files('ducklake', 'test');
+query III
+SELECT table_name, files_processed, files_created FROM ducklake_rewrite_data_files('ducklake', 'test')
+----
+test	1	1
 
 query I
 SELECT delete_file_id FROM ducklake_metadata.ducklake_delete_file
@@ -123,12 +117,9 @@ statement ok
 DELETE FROM test
 WHERE key = 3000;
 
-# flush to create delete file
-statement ok
-CALL ducklake_flush_inlined_data('ducklake')
-
-statement ok
-CALL ducklake_rewrite_data_files('ducklake', 'test');
+query III
+SELECT table_name, files_processed, files_created FROM ducklake_rewrite_data_files('ducklake', 'test')
+----
 
 query I
 SELECT delete_file_id FROM ducklake_metadata.ducklake_delete_file
@@ -138,8 +129,10 @@ SELECT delete_file_id FROM ducklake_metadata.ducklake_delete_file
 7
 
 # Test that a manual delete_threshold option has priority over the global value.
-statement ok
-CALL ducklake_rewrite_data_files('ducklake', 'test', delete_threshold => 0);
+query III
+SELECT table_name, files_processed, files_created FROM ducklake_rewrite_data_files('ducklake', 'test', delete_threshold => 0)
+----
+test	1	1
 
 
 # Try invalid values for threshold
@@ -182,14 +175,8 @@ SELECT snapshot_id, changes FROM snapshots();
 6	{rewrite_delete=[1]}
 7	{tables_deleted_from=[1]}
 8	{rewrite_delete=[1]}
-9	{inlined_delete=[1]}
-10	{tables_deleted_from=[1]}
-11	{rewrite_delete=[1]}
-
-query I
-select count(*) from test AT (VERSION => 2);
-----
-10000
+9	{tables_deleted_from=[1]}
+10	{rewrite_delete=[1]}
 
 query I
 select count(*) from test AT (VERSION => 3);
@@ -228,11 +215,6 @@ select count(*) from test AT (VERSION => 9);
 
 query I
 select count(*) from test AT (VERSION => 10);
-----
-3000
-
-query I
-select count(*) from test AT (VERSION => 11);
 ----
 3000
 

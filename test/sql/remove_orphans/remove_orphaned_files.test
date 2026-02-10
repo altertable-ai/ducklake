@@ -25,19 +25,13 @@ CREATE TABLE test (a integer)
 statement ok
 insert into test values (1);
 
-# flush to create file
-statement ok
-CALL ducklake_flush_inlined_data('ducklake')
-
 statement ok
 insert into test values (2);
 
-# flush to create file
-statement ok
-CALL ducklake_flush_inlined_data('ducklake')
-
-statement ok
-CALL ducklake_merge_adjacent_files('ducklake');
+query III
+SELECT table_name, files_processed, files_created FROM ducklake_merge_adjacent_files('ducklake')
+----
+test	2	1
 
 # Add orphaned file
 statement ok

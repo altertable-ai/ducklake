@@ -30,6 +30,7 @@ bool PostgresMetadataManager::TypeIsNativelySupported(const LogicalType &type) {
 	case LogicalTypeId::BLOB:
 	// Postgres cannot store null bytes in VARCHAR/TEXT columns
 	case LogicalTypeId::VARCHAR:
+	case LogicalTypeId::VARIANT:
 		return false;
 	default:
 		return true;

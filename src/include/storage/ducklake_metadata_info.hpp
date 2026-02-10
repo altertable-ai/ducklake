@@ -10,6 +10,7 @@
 
 #include "duckdb/common/common.hpp"
 #include "duckdb/common/unordered_set.hpp"
+#include "duckdb/common/unordered_map.hpp"
 #include "duckdb/common/case_insensitive_map.hpp"
 #include "duckdb/common/optional_idx.hpp"
 #include "duckdb/common/reference_map.hpp"
@@ -22,6 +23,7 @@
 #include "duckdb/common/enums/order_type.hpp"
 
 namespace duckdb {
+struct DuckLakeVariantStatsInfo;
 
 //===--------------------------------------------------------------------===//
 // Compaction Type
@@ -127,6 +129,15 @@ struct DuckLakeColumnStatsInfo {
 	string max_val;
 	string contains_nan;
 	string extra_stats;
+	vector<DuckLakeVariantStatsInfo> variant_stats;
+
+	static DuckLakeColumnStatsInfo FromColumnStats(FieldIndex field_id, const DuckLakeColumnStats &stats);
+};
+
+struct DuckLakeVariantStatsInfo {
+	string field_name;
+	string shredded_type;
+	DuckLakeColumnStatsInfo field_stats;
 };
 
 struct DuckLakeFilePartitionInfo {
@@ -349,6 +360,7 @@ enum class DuckLakeDataType {
 };
 
 struct DuckLakeFileListEntry {
+	optional_idx data_file_id;
 	DuckLakeFileData file;
 	DuckLakeFileData delete_file;
 	optional_idx row_id_start;
@@ -364,6 +376,8 @@ struct DuckLakeFileListEntry {
 	DataFileIndex file_id;
 	//! Inlined file deletions (row positions that have been deleted and stored in the metadata database)
 	set<idx_t> inlined_file_deletions;
+	//! Column min/max values for dynamic filter pushdown
+	unordered_map<idx_t, pair<string, string>> column_min_max;
 };
 
 struct DuckLakeDeleteScanEntry {

@@ -38,8 +38,10 @@ BEGIN
 statement ok con2
 BEGIN
 
-statement ok con1
-CALL ducklake_merge_adjacent_files('ducklake');
+query III con1
+SELECT table_name, files_processed, files_created FROM ducklake_merge_adjacent_files('ducklake')
+----
+test	2	1
 
 statement ok con2
 DELETE FROM ducklake.test
@@ -71,8 +73,10 @@ BEGIN
 statement ok con1
 DELETE FROM ducklake.test
 
-statement ok con2
-CALL ducklake_merge_adjacent_files('ducklake');
+query III con2
+SELECT table_name, files_processed, files_created FROM ducklake_merge_adjacent_files('ducklake')
+----
+test	3	1
 
 statement ok con1
 COMMIT
@@ -98,11 +102,15 @@ BEGIN
 statement ok con2
 BEGIN
 
-statement ok con1
-CALL ducklake_merge_adjacent_files('ducklake');
+query III con1
+SELECT table_name, files_processed, files_created FROM ducklake_merge_adjacent_files('ducklake')
+----
+test	2	1
 
-statement ok con2
-CALL ducklake_merge_adjacent_files('ducklake');
+query III con2
+SELECT table_name, files_processed, files_created FROM ducklake_merge_adjacent_files('ducklake')
+----
+test	2	1
 
 statement ok con1
 COMMIT
@@ -128,8 +136,10 @@ BEGIN
 statement ok con2
 BEGIN
 
-statement ok con1
-CALL ducklake_merge_adjacent_files('ducklake');
+query III con1
+SELECT table_name, files_processed, files_created FROM ducklake_merge_adjacent_files('ducklake')
+----
+test	3	1
 
 statement ok con2
 INSERT INTO ducklake.test SELECT * FROM range(89, 100);

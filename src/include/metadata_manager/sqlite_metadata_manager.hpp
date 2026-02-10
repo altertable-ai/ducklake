@@ -16,7 +16,13 @@ class SQLiteMetadataManager : public DuckLakeMetadataManager {
 public:
 	explicit SQLiteMetadataManager(DuckLakeTransaction &transaction);
 
+	static unique_ptr<DuckLakeMetadataManager> Create(DuckLakeTransaction &transaction) {
+		return make_uniq<SQLiteMetadataManager>(transaction);
+	}
+
 	bool TypeIsNativelySupported(const LogicalType &type) override;
+
+	string GetColumnTypeInternal(const LogicalType &type) override;
 };
 
 } // namespace duckdb
