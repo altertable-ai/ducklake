@@ -1761,6 +1761,9 @@ string DuckLakeMetadataManager::GetColumnTypeInternal(const LogicalType &column_
 string DuckLakeMetadataManager::GetColumnType(const DuckLakeColumnInfo &col) {
 	auto column_type = DuckLakeTypes::FromString(col.type);
 	if (!TypeIsNativelySupported(column_type)) {
+		if (!column_type.IsNested()) {
+			return GetColumnTypeInternal(column_type);
+		}
 		return "VARCHAR";
 	}
 	switch (column_type.id()) {

@@ -151,15 +151,15 @@ string ToSQLString(DuckLakeMetadataManager &metadata_manager, const Value &value
 	case LogicalTypeId::DOUBLE: {
 		double val = DoubleValue::Get(value);
 		if (!value.DoubleIsFinite(val)) {
-			if (!Value::IsNan(val)) {
-				// to infinity and beyond
-				return val < 0 ? "-1e1000" : "1e1000";
-			}
 			return "'" + value.ToString() + "'::" + value_type;
 		}
 		return value.ToString();
 	}
 	case LogicalTypeId::LIST: {
+		if (!metadata_manager.TypeIsNativelySupported(value.type())) {
+			// Stored as VARCHAR text - use ToString() which produces parseable format
+			return value.ToString();
+		}
 		string ret = "[";
 		auto &list_values = ListValue::GetChildren(value);
 		for (idx_t i = 0; i < list_values.size(); i++) {
@@ -173,6 +173,9 @@ string ToSQLString(DuckLakeMetadataManager &metadata_manager, const Value &value
 		return ret;
 	}
 	case LogicalTypeId::ARRAY: {
+		if (!metadata_manager.TypeIsNativelySupported(value.type())) {
+			return value.ToString();
+		}
 		string ret = "[";
 		auto &array_values = ArrayValue::GetChildren(value);
 		for (idx_t i = 0; i < array_values.size(); i++) {
@@ -199,6 +202,14 @@ string ToSQLString(DuckLakeMetadataManager &metadata_manager, const Value &value
 	}
 }
 
+string ToByteaHexLiteral(const string &raw_bytes) {
+	string hex;
+	for (unsigned char c : raw_bytes) {
+		hex += StringUtil::Format("%02x", static_cast<int>(c));
+	}
+	return "'\\x" + hex + "'";
+}
+
 string DuckLakeUtil::ValueToSQL(DuckLakeMetadataManager &metadata_manager, ClientContext &context, const Value &val) {
 	// FIXME: this should be upstreamed
 	if (val.IsNull()) {
@@ -213,6 +224,9 @@ string DuckLakeUtil::ValueToSQL(DuckLakeMetadataManager &metadata_manager, Clien
 	switch (val.type().id()) {
 	case LogicalTypeId::VARCHAR: {
 		auto &str_val = StringValue::Get(val);
+		if (!metadata_manager.TypeIsNativelySupported(LogicalType::VARCHAR)) {
+			return ToByteaHexLiteral(str_val);
+		}
 		string ret;
 		bool concat = false;
 		for (auto c : str_val) {
@@ -235,6 +249,13 @@ string DuckLakeUtil::ValueToSQL(DuckLakeMetadataManager &metadata_manager, Clien
 		} else {
 			return "'" + ret + "'";
 		}
+	}
+	case LogicalTypeId::BLOB: {
+		if (!metadata_manager.TypeIsNativelySupported(LogicalType::BLOB)) {
+			return ToByteaHexLiteral(StringValue::Get(val));
+		}
+		result = ToSQLString(metadata_manager, val);
+		break;
 	}
 	case LogicalTypeId::MAP: {
 		if (metadata_manager.TypeIsNativelySupported(val.type())) {

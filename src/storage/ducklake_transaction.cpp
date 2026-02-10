@@ -1823,10 +1823,9 @@ void DuckLakeTransaction::FlushChanges() {
 			}
 			can_retry = true;
 			DuckLakeCommitState commit_state(commit_snapshot);
-			string batch_queries = CommitChanges(commit_state, transaction_changes, stats);
-
 			// write the new snapshot
-			batch_queries += metadata_manager->InsertSnapshot();
+			string batch_queries = metadata_manager->InsertSnapshot();
+			batch_queries += CommitChanges(commit_state, transaction_changes, stats);
 
 			batch_queries += WriteSnapshotChanges(commit_state, transaction_changes);
 
