@@ -30,10 +30,10 @@ ALTER TABLE renamed_columns_test RENAME COLUMN sort_key_1 TO sort_key_1_changed;
 statement ok
 ALTER TABLE renamed_columns_test RENAME COLUMN sort_key_2 TO sort_key_2_changed;
 
-# Insert data twice to create two files
+# Insert data twice to create two files (>10 rows each to bypass inlining)
 statement ok
 INSERT INTO renamed_columns_test (unique_id, sort_key_1_changed, sort_key_2_changed)
-FROM range(4) t(i)
+FROM range(11) t(i)
 SELECT
     i AS unique_id,
     i % 2 AS sort_key_1_changed,
@@ -44,11 +44,11 @@ ORDER BY
 
 statement ok
 INSERT INTO renamed_columns_test (unique_id, sort_key_1_changed, sort_key_2_changed)
-FROM range(4) t(i)
+FROM range(11) t(i)
 SELECT
-    i + 4 AS unique_id,
-    (i + 4) % 2 AS sort_key_1_changed,
-    'woot' || (i + 4) AS sort_key_2_changed
+    i + 11 AS unique_id,
+    (i + 11) % 2 AS sort_key_1_changed,
+    'woot' || (i + 11) AS sort_key_2_changed
 ORDER BY
     i DESC
 ;

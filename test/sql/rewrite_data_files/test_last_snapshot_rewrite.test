@@ -117,6 +117,9 @@ statement ok
 DELETE FROM test
 WHERE key = 3000;
 
+statement ok
+CALL ducklake_flush_inlined_data('ducklake')
+
 query III
 SELECT table_name, files_processed, files_created FROM ducklake_rewrite_data_files('ducklake', 'test')
 ----
@@ -175,8 +178,9 @@ SELECT snapshot_id, changes FROM snapshots();
 6	{rewrite_delete=[1]}
 7	{tables_deleted_from=[1]}
 8	{rewrite_delete=[1]}
-9	{tables_deleted_from=[1]}
-10	{rewrite_delete=[1]}
+9	{inlined_delete=[1]}
+10	{tables_deleted_from=[1]}
+11	{rewrite_delete=[1]}
 
 query I
 select count(*) from test AT (VERSION => 3);
@@ -215,6 +219,11 @@ select count(*) from test AT (VERSION => 9);
 
 query I
 select count(*) from test AT (VERSION => 10);
+----
+3000
+
+query I
+select count(*) from test AT (VERSION => 11);
 ----
 3000
 

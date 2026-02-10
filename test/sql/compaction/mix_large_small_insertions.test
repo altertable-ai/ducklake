@@ -88,7 +88,7 @@ SELECT COUNT(*) FROM GLOB('${DATA_PATH}/ducklake_compaction_mix_files/**/*.parqu
 query III
 SELECT table_name, files_processed, files_created FROM ducklake_merge_adjacent_files('ducklake')
 ----
-tbl	5	1
+tbl	4	1
 
 statement ok
 CALL ducklake_cleanup_old_files('ducklake', cleanup_all => true);
