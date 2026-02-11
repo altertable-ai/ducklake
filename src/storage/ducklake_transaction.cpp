@@ -1039,6 +1039,15 @@ void DuckLakeTransaction::GetNewTableInfo(DuckLakeCommitState &commit_state, Duc
 
 			// remap the table in the commit state
 			commit_state.committed_tables.emplace(old_table_id, new_table_id);
+
+			// create an inlined data table entry with the latest columns
+			// (uses tables.front() to get the most up-to-date schema including any ALTER TABLE changes)
+			auto &latest_table = tables.front().get();
+			DuckLakeTableInfo inlined_entry;
+			inlined_entry.id = new_table_id;
+			inlined_entry.uuid = latest_table.GetTableUUID();
+			inlined_entry.columns = latest_table.GetTableColumns();
+			result.new_inlined_data_tables.push_back(std::move(inlined_entry));
 			break;
 		}
 		default:
@@ -1046,15 +1055,25 @@ void DuckLakeTransaction::GetNewTableInfo(DuckLakeCommitState &commit_state, Duc
 		}
 	}
 	if (column_schema_change) {
-		// we changed the column definitions of a table - we need to create a new inlined data table (if data inlining
-		// is enabled)
+		// we changed the column definitions of an existing table - we need to create a new inlined data table
+		// (if data inlining is enabled)
+		// for newly created tables this is already handled in the CREATED case above
 		auto &table = tables.front().get();
-
-		DuckLakeTableInfo table_entry;
-		table_entry.id = table.GetTableId();
-		table_entry.uuid = table.GetTableUUID();
-		table_entry.columns = table.GetTableColumns();
-		result.new_inlined_data_tables.push_back(std::move(table_entry));
+		auto committed_id = commit_state.GetTableId(table);
+		bool already_added = false;
+		for (auto &entry : result.new_inlined_data_tables) {
+			if (entry.id == committed_id) {
+				already_added = true;
+				break;
+			}
+		}
+		if (!already_added) {
+			DuckLakeTableInfo table_entry;
+			table_entry.id = committed_id;
+			table_entry.uuid = table.GetTableUUID();
+			table_entry.columns = table.GetTableColumns();
+			result.new_inlined_data_tables.push_back(std::move(table_entry));
+		}
 	}
 }
 

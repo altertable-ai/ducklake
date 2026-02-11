@@ -2034,9 +2034,6 @@ string DuckLakeMetadataManager::WriteNewTables(DuckLakeSnapshot commit_snapshot,
 		batch_query += "INSERT INTO {METADATA_CATALOG}.ducklake_column VALUES " + column_insert_sql + ";";
 	}
 
-	// write new data-inlining tables (if data-inlining is enabled)
-	batch_query += WriteNewInlinedTables(commit_snapshot, new_tables);
-
 	return batch_query;
 }
 
