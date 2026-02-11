@@ -122,10 +122,26 @@ string ToSQLString(DuckLakeMetadataManager &metadata_manager, const Value &value
 	case LogicalTypeId::VARCHAR:
 	case LogicalTypeId::ENUM: {
 		auto str_val = value.ToString();
-		if (str_val.size() == 1 && str_val[0] == '\0') {
-			return "chr(0)";
+		string ret;
+		bool concat = false;
+		for (auto c : str_val) {
+			switch (c) {
+			case '\0':
+				concat = true;
+				ret += "', chr(0), '";
+				break;
+			case '\'':
+				ret += "''";
+				break;
+			default:
+				ret += c;
+				break;
+			}
 		}
-		return "'" + StringUtil::Replace(value.ToString(), "'", "''") + "'";
+		if (concat) {
+			return "CONCAT('" + ret + "')";
+		}
+		return "'" + ret + "'";
 	}
 	case LogicalTypeId::VARIANT: {
 		Vector tmp(value);
@@ -153,7 +169,7 @@ string ToSQLString(DuckLakeMetadataManager &metadata_manager, const Value &value
 			if (is_unnamed) {
 				ret += ToSQLString(metadata_manager, child);
 			} else {
-				ret += "'" + name + "': " + ToSQLString(metadata_manager, child);
+				ret += "'" + StringUtil::Replace(name, "'", "''") + "': " + ToSQLString(metadata_manager, child);
 			}
 			if (i < struct_values.size() - 1) {
 				ret += ", ";
