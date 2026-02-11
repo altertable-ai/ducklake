@@ -1,5 +1,5 @@
 # name: test/sql/sorted_table/merge_adjacent_sorted_nested_expression.test
-# description: test ducklake merge adjacent files with SET SORTED BY using nested expressions
+# description: test ducklake merge adjacent files with SET SORTED BY using a nested expression
 # group: [sorted_table]
 
 require ducklake
