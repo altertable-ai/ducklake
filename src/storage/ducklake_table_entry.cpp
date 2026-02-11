@@ -633,6 +633,10 @@ unique_ptr<CatalogEntry> DuckLakeTableEntry::AlterTable(DuckLakeTransaction &tra
 			}
 		}
 	}
+	if (transaction.HasTransactionInlinedData(GetTableId())) {
+		transaction.RemoveColumnFromLocalInlinedData(GetTableId(), col.Logical(), field_id);
+	}
+
 	auto removed_index = col.Logical();
 	for (idx_t c_idx = 0; c_idx < table_info.constraints.size(); c_idx++) {
 		auto &constraint = table_info.constraints[c_idx];
@@ -1172,6 +1176,7 @@ unique_ptr<CatalogEntry> DuckLakeTableEntry::AlterTable(DuckLakeTransaction &tra
 unique_ptr<CatalogEntry> DuckLakeTableEntry::Alter(DuckLakeTransaction &transaction, AlterTableInfo &info) {
 	if (transaction.HasTransactionInlinedData(GetTableId())) {
 		if (info.alter_table_type != AlterTableType::ADD_COLUMN &&
+		    info.alter_table_type != AlterTableType::REMOVE_COLUMN &&
 		    info.alter_table_type != AlterTableType::RENAME_TABLE) {
 			throw NotImplementedException("ALTER on a table with transaction-local inlined data is not supported %s",
 			                              EnumUtil::ToString(info.alter_table_type));

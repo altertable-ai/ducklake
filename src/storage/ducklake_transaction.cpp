@@ -2232,6 +2232,64 @@ void DuckLakeTransaction::AddColumnToLocalInlinedData(TableIndex table_id, const
 	table_changes.new_inlined_data->data = std::move(new_data);
 }
 
+static void RemoveFieldStats(map<FieldIndex, DuckLakeColumnStats> &column_stats, const DuckLakeFieldId &field_id) {
+	column_stats.erase(field_id.GetFieldIndex());
+	for (auto &child_id : field_id.Children()) {
+		RemoveFieldStats(column_stats, *child_id);
+	}
+}
+
+void DuckLakeTransaction::RemoveColumnFromLocalInlinedData(TableIndex table_id, LogicalIndex removed_column_index,
+                                                           const DuckLakeFieldId &field_id) {
+	auto entry = table_data_changes.find(table_id);
+	if (entry == table_data_changes.end()) {
+		throw InternalException("RemoveColumnFromLocalInlinedData called but no transaction-local data exists");
+	}
+	auto &table_changes = entry->second;
+	if (!table_changes.new_inlined_data) {
+		throw InternalException("RemoveColumnFromLocalInlinedData called but no inlined data exists");
+	}
+
+	auto &existing = *table_changes.new_inlined_data->data;
+
+	// New types: existing minus the removed column
+	vector<LogicalType> new_types;
+	for (idx_t col_idx = 0; col_idx < existing.Types().size(); col_idx++) {
+		if (col_idx == removed_column_index.index) {
+			continue;
+		}
+		new_types.push_back(existing.Types()[col_idx]);
+	}
+
+	auto context_ref = context.lock();
+	auto new_data = make_uniq<ColumnDataCollection>(*context_ref, new_types);
+
+	ColumnDataAppendState append_state;
+	new_data->InitializeAppend(append_state);
+
+	for (auto &chunk : existing.Chunks()) {
+		DataChunk new_chunk;
+		new_chunk.Initialize(*context_ref, new_types);
+
+		idx_t new_col_idx = 0;
+		for (idx_t col_idx = 0; col_idx < chunk.ColumnCount(); col_idx++) {
+			if (col_idx == removed_column_index.index) {
+				continue;
+			}
+			new_chunk.data[new_col_idx].Reference(chunk.data[col_idx]);
+			new_col_idx++;
+		}
+
+		new_chunk.SetCardinality(chunk.size());
+		new_data->Append(append_state, new_chunk);
+	}
+
+	// Remove stats for the dropped field and all its children
+	RemoveFieldStats(table_changes.new_inlined_data->column_stats, field_id);
+
+	table_changes.new_inlined_data->data = std::move(new_data);
+}
+
 optional_ptr<DuckLakeInlinedDataDeletes> DuckLakeTransaction::GetInlinedDeletes(TableIndex table_id,
                                                                                 const string &table_name) {
 	lock_guard<mutex> guard(table_data_changes_lock);
