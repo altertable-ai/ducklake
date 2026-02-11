@@ -45,6 +45,11 @@ public:
 	unique_ptr<CreateInfo> GetInfo() const override;
 	string ToSQL() const override;
 
+	bool HasTypes() const override {
+		// Only validate types if they were explicitly stored
+		return !types.empty();
+	}
+
 	string GetQuerySQL();
 
 public:

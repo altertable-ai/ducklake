@@ -3,7 +3,6 @@
 #include "duckdb/common/printer.hpp"
 #include "duckdb/storage/statistics/base_statistics.hpp"
 #include "duckdb/storage/statistics/struct_stats.hpp"
-#include "duckdb/storage/statistics/variant_stats.hpp"
 #include "duckdb/storage/statistics/list_stats.hpp"
 #include "duckdb/common/type_visitor.hpp"
 #include "storage/ducklake_insert.hpp"
@@ -365,34 +364,22 @@ void ToNestedVariantStats(const string &field_name, reference<NestedVariantStats
 }
 
 unique_ptr<BaseStatistics> DuckLakeColumnVariantStats::ToStats() const {
-	if (shredded_field_stats.empty()) {
-		return nullptr;
-	}
-	// create a nested structure that holds all the stats in the original nested order
-	NestedVariantStats nested_stats;
-	for (auto &entry : shredded_field_stats) {
-		auto &full_field_name = entry.first;
-		ToNestedVariantStats(full_field_name, nested_stats);
-	}
-	// get the type
-	auto shredded_type = nested_stats.ToType(shredded_field_stats);
-	auto full_shredding_type = TypeVisitor::VisitReplace(shredded_type, [](const LogicalType &type) {
-		return LogicalType::STRUCT({{"untyped_value_index", LogicalType::UINTEGER}, {"typed_value", type}});
-	});
-	auto variant_stats = VariantStats::CreateShredded(full_shredding_type);
-
-	auto &shredded_stats = VariantStats::GetShreddedStats(variant_stats);
-	nested_stats.ConvertStats(shredded_field_stats, shredded_stats);
-
-	variant_stats.SetHasNull();
-	variant_stats.SetHasNoNull();
-	return variant_stats.ToUnique();
+	// Variant type statistics not supported in DuckDB 1.4.2
+	// Return unknown statistics
+	return nullptr;
 }
 
 bool DuckLakeColumnVariantStats::ParseStats(const string &stats_name, const vector<Value> &stats_children) {
 	if (stats_name == "variant_type") {
+		// Variant type parsing not supported in DuckDB 1.4.2
+		// Try to parse as a regular type string
 		auto type_str = StringValue::Get(stats_children[1]);
-		variant_type = UnboundType::TryParseAndDefaultBind(type_str);
+		try {
+			variant_type = DBConfig::ParseLogicalType(type_str);
+		} catch (...) {
+			// If parsing fails, use VARCHAR as fallback
+			variant_type = LogicalType::VARCHAR;
+		}
 		return true;
 	}
 	return false;

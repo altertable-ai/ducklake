@@ -85,8 +85,8 @@ unique_ptr<GlobalSourceState> DuckLakeCompaction::GetGlobalSourceState(ClientCon
 	return make_uniq<DuckLakeCompactionSourceState>();
 }
 
-SourceResultType DuckLakeCompaction::GetDataInternal(ExecutionContext &context, DataChunk &chunk,
-                                                     OperatorSourceInput &input) const {
+SourceResultType DuckLakeCompaction::GetData(ExecutionContext &context, DataChunk &chunk,
+                                             OperatorSourceInput &input) const {
 	auto &source_state = input.global_state.Cast<DuckLakeCompactionSourceState>();
 	if (source_state.returned_result) {
 		return SourceResultType::FINISHED;

@@ -23,6 +23,7 @@
 #include "duckdb/function/function_binder.hpp"
 #include "duckdb/planner/operator/logical_projection.hpp"
 #include "storage/ducklake_variant_stats.hpp"
+#include "duckdb/main/settings.hpp"
 
 namespace duckdb {
 
@@ -209,8 +210,8 @@ SinkResultType DuckLakeInsert::Sink(ExecutionContext &context, DataChunk &chunk,
 //===--------------------------------------------------------------------===//
 // GetData
 //===--------------------------------------------------------------------===//
-SourceResultType DuckLakeInsert::GetDataInternal(ExecutionContext &context, DataChunk &chunk,
-                                                 OperatorSourceInput &input) const {
+SourceResultType DuckLakeInsert::GetData(ExecutionContext &context, DataChunk &chunk,
+                                         OperatorSourceInput &input) const {
 	auto &global_state = sink_state->Cast<DuckLakeInsertGlobalState>();
 	auto value = Value::BIGINT(NumericCast<int64_t>(global_state.total_insert_count));
 	chunk.SetCardinality(1);
@@ -254,7 +255,7 @@ CopyFunctionCatalogEntry &DuckLakeFunctions::GetCopyFunction(ClientContext &cont
 	// name), but that do not offer enough control
 	auto &db = *context.db;
 	string extension_name = ExtensionHelper::FindExtensionInEntries(name, EXTENSION_COPY_FUNCTIONS);
-	if (!extension_name.empty() && Settings::Get<AutoloadKnownExtensionsSetting>(context) &&
+	if (!extension_name.empty() && ClientConfig::GetSetting<AutoloadKnownExtensionsSetting>(context) &&
 	    ExtensionHelper::CanAutoloadExtension(extension_name)) {
 		// This will either succeed or throw
 		ExtensionHelper::AutoLoadExtension(db, extension_name);

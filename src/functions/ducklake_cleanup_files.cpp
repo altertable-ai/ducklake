@@ -137,12 +137,10 @@ void DuckLakeCleanupExecute(ClientContext &context, TableFunctionInput &data_p, 
 	if (!state.executed && !data.dry_run) {
 		// delete the files
 		auto &fs = FileSystem::GetFileSystem(context);
-		vector<string> paths;
-		paths.reserve(data.files.size());
+		// Remove files one by one
 		for (const auto &file : data.files) {
-			paths.push_back(file.path);
+			fs.RemoveFile(file.path);
 		}
-		fs.RemoveFiles(paths);
 		if (data.type == CleanupType::OLD_FILES) {
 			// If we are removing old files, we need to remove them from the catalog
 			auto &transaction = DuckLakeTransaction::Get(context, data.catalog);

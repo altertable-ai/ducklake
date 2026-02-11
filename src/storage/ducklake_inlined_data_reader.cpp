@@ -170,8 +170,8 @@ bool DuckLakeInlinedDataReader::TryInitializeScan(ClientContext &context, Global
 	return true;
 }
 
-AsyncResult DuckLakeInlinedDataReader::Scan(ClientContext &context, GlobalTableFunctionState &global_state,
-                                            LocalTableFunctionState &local_state, DataChunk &chunk) {
+void DuckLakeInlinedDataReader::Scan(ClientContext &context, GlobalTableFunctionState &global_state,
+                                     LocalTableFunctionState &local_state, DataChunk &chunk) {
 	if (!virtual_columns.empty()) {
 		scan_chunk.Reset();
 		data->data->Scan(state, scan_chunk);
@@ -200,7 +200,7 @@ AsyncResult DuckLakeInlinedDataReader::Scan(ClientContext &context, GlobalTableF
 	}
 	idx_t scan_count = chunk.size();
 	if (scan_count == 0) {
-		return AsyncResult(SourceResultType::FINISHED);
+		return;
 	}
 	if (filters || deletion_filter) {
 		SelectionVector sel;
@@ -231,7 +231,6 @@ AsyncResult DuckLakeInlinedDataReader::Scan(ClientContext &context, GlobalTableF
 		}
 	}
 	file_row_number += NumericCast<int64_t>(scan_count);
-	return AsyncResult(SourceResultType::HAVE_MORE_OUTPUT);
 }
 
 void DuckLakeInlinedDataReader::AddVirtualColumn(column_t virtual_column_id) {

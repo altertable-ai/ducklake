@@ -36,12 +36,12 @@ public:
 	                                                const vector<column_t> &column_ids,
 	                                                TableFilterSet &filters) const override;
 
-	vector<OpenFileInfo> GetAllFiles() const override;
-	FileExpandResult GetExpandResult() const override;
-	idx_t GetTotalFileCount() const override;
-	unique_ptr<NodeStatistics> GetCardinality(ClientContext &context) const override;
+	vector<OpenFileInfo> GetAllFiles() override;
+	FileExpandResult GetExpandResult() override;
+	idx_t GetTotalFileCount() override;
+	unique_ptr<NodeStatistics> GetCardinality(ClientContext &context) override;
 	DuckLakeTableEntry &GetTable();
-	unique_ptr<MultiFileList> Copy() const override;
+	unique_ptr<MultiFileList> Copy() override;
 	bool HasTransactionLocalData() const {
 		return !transaction_local_files.empty() || transaction_local_data;
 	}
@@ -57,7 +57,7 @@ public:
 
 protected:
 	//! Get the i-th expanded file
-	OpenFileInfo GetFile(idx_t i) const override;
+	OpenFileInfo GetFile(idx_t i) override;
 
 private:
 	void GetFilesForTable() const;

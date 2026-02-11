@@ -2,6 +2,7 @@
 #include "duckdb/main/attached_database.hpp"
 #include "duckdb/main/database.hpp"
 #include "duckdb/main/extension_helper.hpp"
+#include "duckdb/main/settings.hpp"
 
 #include "storage/ducklake_initializer.hpp"
 
@@ -28,7 +29,7 @@ void DuckLakeInitializer::CheckAndAutoloadedRequiredExtension(const string &patt
 	string required_extension = LookupExtensionForPattern(pattern);
 	if (!required_extension.empty() && !context.db->ExtensionIsLoaded(required_extension)) {
 		if (!ExtensionHelper::CanAutoloadExtension(required_extension) ||
-		    !Settings::Get<AutoloadKnownExtensionsSetting>(context)) {
+		    !ClientConfig::GetSetting<AutoloadKnownExtensionsSetting>(context)) {
 			auto error_message =
 			    "Data path " + pattern + " requires the extension " + required_extension + " to be loaded";
 			error_message =

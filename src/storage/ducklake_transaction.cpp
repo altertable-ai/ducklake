@@ -97,7 +97,7 @@ Connection &DuckLakeTransaction::GetConnection() {
 
 		// set max error reporting to 0 so that during error reporting we don't traverse other schemas / catalogs
 		auto &client_config = ClientConfig::GetConfig(*connection->context);
-		client_config.user_settings.SetUserSetting(CatalogErrorMaxSchemasSetting::SettingIndex, Value::UBIGINT(0));
+		client_config.set_variables[CatalogErrorMaxSchemasSetting::Name] = Value::UBIGINT(0);
 		connection->BeginTransaction();
 	}
 	return *connection;
@@ -2314,7 +2314,10 @@ void DuckLakeTransaction::TransactionLocalDelete(TableIndex table_id, const stri
 				for (auto &old_file : file.delete_files) {
 					files_to_delete.push_back(old_file.file_name);
 				}
-				fs.RemoveFiles(files_to_delete);
+				// Remove files one by one
+				for (const auto &file : files_to_delete) {
+					fs.RemoveFile(file);
+				}
 				file.delete_files.clear();
 			}
 			file.delete_files.push_back(std::move(delete_file));

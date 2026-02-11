@@ -33,8 +33,7 @@ public:
 
 public:
 	// Source interface
-	SourceResultType GetDataInternal(ExecutionContext &context, DataChunk &chunk,
-	                                 OperatorSourceInput &input) const override;
+	SourceResultType GetData(ExecutionContext &context, DataChunk &chunk, OperatorSourceInput &input) const override;
 
 	bool IsSource() const override {
 		return true;
@@ -63,8 +62,8 @@ DuckLakeMergeInsert::DuckLakeMergeInsert(PhysicalPlan &physical_plan, const vect
     : PhysicalOperator(physical_plan, PhysicalOperatorType::EXTENSION, types, 1), copy(copy), insert(insert) {
 }
 
-SourceResultType DuckLakeMergeInsert::GetDataInternal(ExecutionContext &context, DataChunk &chunk,
-                                                      OperatorSourceInput &input) const {
+SourceResultType DuckLakeMergeInsert::GetData(ExecutionContext &context, DataChunk &chunk,
+                                              OperatorSourceInput &input) const {
 	return SourceResultType::FINISHED;
 }
 

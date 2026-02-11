@@ -3154,7 +3154,8 @@ FROM {METADATA_CATALOG}.ducklake_snapshot
 WHERE snapshot_id = %llu;)",
 		                                              val.DefaultCastAs(LogicalType::UBIGINT).GetValue<idx_t>()));
 	} else if (StringUtil::CIEquals(unit, "timestamp")) {
-		result = transaction.Query(StringUtil::Format(R"(
+		result = transaction.Query(StringUtil::Format(
+		    R"(
 SELECT snapshot_id, schema_version, next_catalog_id, next_file_id
 FROM {METADATA_CATALOG}.ducklake_snapshot
 WHERE snapshot_id = (
@@ -3163,8 +3164,7 @@ WHERE snapshot_id = (
 	WHERE snapshot_time %s= %s
 	ORDER BY snapshot_time %s
 	LIMIT 1);)",
-		                                  timestamp_condition, val.DefaultCastAs(LogicalType::VARCHAR).ToSQLString(),
-		                                  timestamp_order));
+		    timestamp_condition, val.DefaultCastAs(LogicalType::VARCHAR).ToSQLString(), timestamp_order));
 	} else {
 		throw InvalidInputException("Unsupported AT clause unit - %s", unit);
 	}
@@ -3526,7 +3526,7 @@ WHERE table_id=tid AND column_id=cid;
 
 template <class T>
 static timestamp_tz_t GetTimestampTZFromRow(ClientContext &context, const T &row, idx_t col_idx) {
-	auto val = row.GetChunk().GetValue(col_idx, row.GetRowInChunk());
+	auto val = row.iterator.chunk->GetValue(col_idx, row.row);
 	return val.CastAs(context, LogicalType::TIMESTAMP_TZ).template GetValue<timestamp_tz_t>();
 }
 
@@ -3551,9 +3551,9 @@ ORDER BY snapshot_id
 		snapshot_info.time = GetTimestampTZFromRow(*context, row, 1);
 		snapshot_info.schema_version = row.GetValue<idx_t>(2);
 		snapshot_info.change_info.changes_made = row.IsNull(3) ? string() : row.GetValue<string>(3);
-		snapshot_info.author = row.GetChunk().GetValue(4, row.GetRowInChunk());
-		snapshot_info.commit_message = row.GetChunk().GetValue(5, row.GetRowInChunk());
-		snapshot_info.commit_extra_info = row.GetChunk().GetValue(6, row.GetRowInChunk());
+		snapshot_info.author = row.iterator.chunk->GetValue(4, row.row);
+		snapshot_info.commit_message = row.iterator.chunk->GetValue(5, row.row);
+		snapshot_info.commit_extra_info = row.iterator.chunk->GetValue(6, row.row);
 		snapshots.push_back(std::move(snapshot_info));
 	}
 	return snapshots;
