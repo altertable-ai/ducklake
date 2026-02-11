@@ -26,6 +26,8 @@ bool SQLiteMetadataManager::TypeIsNativelySupported(const LogicalType &type) {
 
 string SQLiteMetadataManager::GetColumnTypeInternal(const LogicalType &column_type) {
 	switch (column_type.id()) {
+	case LogicalTypeId::FLOAT:
+	case LogicalTypeId::DOUBLE:
 	case LogicalTypeId::VARIANT:
 		return "VARCHAR";
 	default:
