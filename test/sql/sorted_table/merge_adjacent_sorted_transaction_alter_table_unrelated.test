@@ -1,0 +1,64 @@
+# name: test/sql/sorted_table/merge_adjacent_sorted_transaction_alter_table_unrelated.test
+# description: test that SET SORTED BY works correctly
+# group: [sorted_table]
+
+require ducklake
+
+require parquet
+
+test-env DUCKLAKE_CONNECTION __TEST_DIR__/{UUID}.db
+
+statement ok
+ATTACH 'ducklake:${DUCKLAKE_CONNECTION}' AS ducklake (DATA_PATH '__TEST_DIR__/sorted_transaction/')
+
+statement ok
+USE ducklake;
+
+# Create table
+statement ok
+CREATE TABLE test_table (x INT, y VARCHAR);
+
+# Insert data in unsorted order
+statement ok
+INSERT INTO test_table VALUES (5, 'e'), (2, 'b'), (8, 'h'), (1, 'a'), (9, 'i');
+
+statement ok
+INSERT INTO test_table VALUES (3, 'c'), (7, 'g'), (4, 'd'), (6, 'f');
+
+# Set sort order
+statement ok
+ALTER TABLE test_table SET SORTED BY (x ASC);
+
+# Merge and verify sorted
+statement ok
+SELECT * FROM ducklake_merge_adjacent_files('ducklake', 'test_table', max_compacted_files => 10);
+
+query II
+SELECT * FROM test_table;
+----
+1	a
+2	b
+3	c
+4	d
+5	e
+6	f
+7	g
+8	h
+9	i
+
+# Test RESET clears the sort
+statement ok
+ALTER TABLE test_table RESET SORTED BY;
+
+statement ok
+INSERT INTO test_table VALUES (0, 'zero');
+
+statement ok
+SELECT * FROM ducklake_merge_adjacent_files('ducklake', 'test_table', max_compacted_files => 10);
+
+# After RESET, new data should appear unsorted
+query I
+SELECT x FROM test_table WHERE x <= 1 ORDER BY x;
+----
+0
+1

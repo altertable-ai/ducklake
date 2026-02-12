@@ -144,6 +144,7 @@ public:
 	virtual string WriteNewViews(const vector<DuckLakeViewInfo> &new_views);
 	virtual string WriteNewPartitionKeys(DuckLakeSnapshot commit_snapshot,
 	                                     const vector<DuckLakePartitionInfo> &new_partitions);
+	virtual string WriteNewSortKeys(DuckLakeSnapshot commit_snapshot, const vector<DuckLakeSortInfo> &new_sort_keys);
 	virtual string WriteDroppedColumns(const vector<DuckLakeDroppedColumn> &dropped_columns);
 	virtual string WriteNewColumns(const vector<DuckLakeNewColumn> &new_columns);
 	virtual string WriteNewTags(const vector<DuckLakeTagInfo> &new_tags);
@@ -202,6 +203,7 @@ public:
 
 	virtual void MigrateV01();
 	virtual void MigrateV02(bool allow_failures = false);
+	virtual void MigrateV03(bool allow_failures = false);
 
 	string LoadPath(string path);
 	string StorePath(string path);

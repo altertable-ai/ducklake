@@ -173,6 +173,7 @@ private:
 	vector<DuckLakeSchemaInfo> GetNewSchemas(DuckLakeCommitState &commit_state);
 	NewTableInfo GetNewTables(DuckLakeCommitState &commit_state, TransactionChangeInformation &transaction_changes);
 	DuckLakePartitionInfo GetNewPartitionKey(DuckLakeCommitState &commit_state, DuckLakeTableEntry &tabletable_id);
+	DuckLakeSortInfo GetNewSortKey(DuckLakeCommitState &commit_state, DuckLakeTableEntry &table);
 	DuckLakeTableInfo GetNewTable(DuckLakeCommitState &commit_state, DuckLakeTableEntry &table);
 	DuckLakeViewInfo GetNewView(DuckLakeCommitState &commit_state, DuckLakeViewEntry &view);
 	void FlushNewPartitionKey(DuckLakeSnapshot &commit_snapshot, DuckLakeTableEntry &table);

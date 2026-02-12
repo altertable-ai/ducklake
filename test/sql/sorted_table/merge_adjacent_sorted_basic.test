@@ -1,0 +1,75 @@
+# name: test/sql/sorted_table/merge_adjacent_sorted_basic.test
+# description: test ducklake merge adjacent files with SET SORTED BY metadata
+# group: [sorted_table]
+
+require ducklake
+
+require parquet
+
+test-env DUCKLAKE_CONNECTION __TEST_DIR__/{UUID}.db
+
+statement ok
+ATTACH 'ducklake:${DUCKLAKE_CONNECTION}' AS ducklake (DATA_PATH '__TEST_DIR__/merge_adjacent_sorted/')
+
+statement ok
+USE ducklake;
+
+# Create table and insert data to create multiple files
+statement ok
+CREATE TABLE test_table (x INT, y VARCHAR);
+
+statement ok
+INSERT INTO test_table SELECT i, 'val_' || i FROM range(10, 20) t(i);
+
+statement ok
+INSERT INTO test_table SELECT i, 'val_' || i FROM range(1, 10) t(i);
+
+statement ok
+INSERT INTO test_table SELECT i, 'val_' || i FROM range(20, 30) t(i);
+
+# Verify data is not sorted initially
+query II
+SELECT * FROM test_table ORDER BY x LIMIT 3;
+----
+1	val_1
+2	val_2
+3	val_3
+
+# Set sort order to DESC
+statement ok
+ALTER TABLE test_table SET SORTED BY (x DESC);
+
+# Merge files with sorting
+statement ok
+SELECT * FROM ducklake_merge_adjacent_files('ducklake', 'test_table', max_compacted_files => 10);
+
+# Verify data is now sorted DESC
+query II
+SELECT * FROM test_table LIMIT 5;
+----
+29	val_29
+28	val_28
+27	val_27
+26	val_26
+25	val_25
+
+# Test RESET SORTED BY
+statement ok
+ALTER TABLE test_table RESET SORTED BY;
+
+statement ok
+INSERT INTO test_table VALUES (100, 'new_val');
+
+statement ok
+SELECT * FROM ducklake_merge_adjacent_files('ducklake', 'test_table', max_compacted_files => 10);
+
+# After reset, data should not be sorted
+query II
+SELECT * FROM test_table WHERE x >= 25 ORDER BY x;
+----
+25	val_25
+26	val_26
+27	val_27
+28	val_28
+29	val_29
+100	new_val
