@@ -27,12 +27,18 @@ VALUES
     (4, 'four');
 
 statement ok
+CALL ducklake_flush_inlined_data('ducklake')
+
+statement ok
 INSERT INTO sort_nested_expr_test (unique_id, name)
 VALUES
     (5, 'five'),
     (6, 'six'),
     (7, 'seven'),
     (8, 'eight');
+
+statement ok
+CALL ducklake_flush_inlined_data('ducklake')
 
 # Verify we have 2 data files before compaction
 query II
@@ -43,8 +49,8 @@ ON df.table_id = t.table_id
 WHERE
 t.table_name = 'sort_nested_expr_test'
 ----
-0	1
 1	1
+3	1
 
 # Set sorted by a nested expression: concat(substr(power(unique_id, unique_id)::varchar, 1, 1), name)
 statement ok
@@ -77,7 +83,7 @@ ON df.table_id = t.table_id
 WHERE
 t.table_name = 'sort_nested_expr_test'
 ----
-2	1
+4	1
 
 # Verify data is now sorted by the nested expression
 query III

@@ -181,15 +181,15 @@ WHERE
 t.table_name = 'sort_on_compaction'
 ORDER BY ALL
 ----
-1	4	5	0	sort_key_1	ASC	NULLS_LAST
-1	4	5	1	sort_key_2	ASC	NULLS_LAST
-1	5	6	0	sort_key_1	DESC	NULLS_LAST
-1	5	6	1	sort_key_2	DESC	NULLS_LAST
-1	6	9	0	sort_key_1	ASC	NULLS_LAST
-1	6	9	1	sort_key_2	ASC	NULLS_LAST
-1	9	10	0	concat(sort_key_1, '_', sort_key_2)	ASC	NULLS_LAST
-1	10	NULL	0	sort_key_1	ASC	NULLS_LAST
-1	10	NULL	1	sort_key_2	ASC	NULLS_LAST
+1	6	7	0	sort_key_1	ASC	NULLS_LAST
+1	6	7	1	sort_key_2	ASC	NULLS_LAST
+1	7	8	0	sort_key_1	DESC	NULLS_LAST
+1	7	8	1	sort_key_2	DESC	NULLS_LAST
+1	8	11	0	sort_key_1	ASC	NULLS_LAST
+1	8	11	1	sort_key_2	ASC	NULLS_LAST
+1	11	12	0	concat(sort_key_1, '_', sort_key_2)	ASC	NULLS_LAST
+1	12	NULL	0	sort_key_1	ASC	NULLS_LAST
+1	12	NULL	1	sort_key_2	ASC	NULLS_LAST
 
 
 statement ok
@@ -207,15 +207,15 @@ WHERE
 t.table_name = 'sort_on_compaction'
 ORDER BY ALL
 ----
-1	4	5	0	sort_key_1	ASC	NULLS_LAST
-1	4	5	1	sort_key_2	ASC	NULLS_LAST
-1	5	6	0	sort_key_1	DESC	NULLS_LAST
-1	5	6	1	sort_key_2	DESC	NULLS_LAST
-1	6	9	0	sort_key_1	ASC	NULLS_LAST
-1	6	9	1	sort_key_2	ASC	NULLS_LAST
-1	9	10	0	concat(sort_key_1, '_', sort_key_2)	ASC	NULLS_LAST
-1	10	11	0	sort_key_1	ASC	NULLS_LAST
-1	10	11	1	sort_key_2	ASC	NULLS_LAST
+1	6	7	0	sort_key_1	ASC	NULLS_LAST
+1	6	7	1	sort_key_2	ASC	NULLS_LAST
+1	7	8	0	sort_key_1	DESC	NULLS_LAST
+1	7	8	1	sort_key_2	DESC	NULLS_LAST
+1	8	11	0	sort_key_1	ASC	NULLS_LAST
+1	8	11	1	sort_key_2	ASC	NULLS_LAST
+1	11	12	0	concat(sort_key_1, '_', sort_key_2)	ASC	NULLS_LAST
+1	12	13	0	sort_key_1	ASC	NULLS_LAST
+1	12	13	1	sort_key_2	ASC	NULLS_LAST
 
 statement ok
 CALL ducklake_expire_snapshots('ducklake', older_than => now());

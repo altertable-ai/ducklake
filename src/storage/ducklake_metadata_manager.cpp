@@ -2222,11 +2222,13 @@ string DuckLakeMetadataManager::WriteNewInlinedData(DuckLakeSnapshot &commit_sna
 
 	auto context_ptr = transaction.context.lock();
 	auto &context = *context_ptr;
+	unordered_set<idx_t> pre_created_inlined_tables_with_data;
 	for (auto &entry : new_data) {
 		string inlined_table_name;
 		for (auto &inlined_table : new_inlined_data_tables_result) {
 			if (inlined_table.id == entry.table_id) {
 				inlined_table_name = GetInlinedTableName(inlined_table, commit_snapshot);
+				pre_created_inlined_tables_with_data.insert(entry.table_id.index);
 			}
 		}
 		if (inlined_table_name.empty()) {
@@ -2310,6 +2312,16 @@ WHERE table_id = %d AND schema_version=(
 			string append_query = StringUtil::Format("INSERT INTO {METADATA_CATALOG}.%s VALUES %s;",
 			                                         SQLIdentifier(inlined_table_name), values);
 			batch_query += append_query;
+		}
+	}
+	// We need to handle new tables that have created new inlined tables in the same commit
+	// Since creating or inserting data to an inline table also creates a new snapshot
+	for (auto table_id : pre_created_inlined_tables_with_data) {
+		for (auto &new_table : new_tables) {
+			if (new_table.id.index == table_id) {
+				commit_snapshot.schema_version++;
+				break;
+			}
 		}
 	}
 	return batch_query;
