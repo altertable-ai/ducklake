@@ -229,6 +229,10 @@ public:
 		                                       partition_id, child);
 	}
 
+	string GetName() const override {
+		return "DUCKLAKE_FLUSH_DATA";
+	}
+
 	string GetExtensionName() const override {
 		return "ducklake";
 	}

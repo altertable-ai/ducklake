@@ -157,13 +157,15 @@ t.table_name = 'sort_on_compaction'
 statement error
 ALTER TABLE sort_on_compaction SET SORTED BY (WOOOOT ASC ,   BLAH ASC);
 ----
-Column "WOOOOT" does not exist in table "sort_on_compaction"
+Columns in the SET SORTED BY statement were not found in the DuckLake table. Unmatched columns were: WOOOOT, BLAH
 
-# Expressions are not supported, only column refs
-statement error
+# Expressions are now supported in SET SORTED BY
+statement ok
 ALTER TABLE sort_on_compaction SET SORTED BY (concat(sort_key_1, '_', sort_key_2) ASC);
-----
-SET SORTED BY only supports column references, not expressions
+
+# Reset back to simple column sort for the rest of the test
+statement ok
+ALTER TABLE sort_on_compaction SET SORTED BY (sort_key_1 ASC NULLS LAST, sort_key_2 ASC NULLS LAST);
 
 # Drop the table, then expire the snapshots, then validate that the catalog data has been removed
 
@@ -179,12 +181,15 @@ WHERE
 t.table_name = 'sort_on_compaction'
 ORDER BY ALL
 ----
-1	6	7	0	sort_key_1	ASC	NULLS_LAST
-1	6	7	1	sort_key_2	ASC	NULLS_LAST
-1	7	8	0	sort_key_1	DESC	NULLS_LAST
-1	7	8	1	sort_key_2	DESC	NULLS_LAST
-1	8	NULL	0	sort_key_1	ASC	NULLS_LAST
-1	8	NULL	1	sort_key_2	ASC	NULLS_LAST
+1	4	5	0	sort_key_1	ASC	NULLS_LAST
+1	4	5	1	sort_key_2	ASC	NULLS_LAST
+1	5	6	0	sort_key_1	DESC	NULLS_LAST
+1	5	6	1	sort_key_2	DESC	NULLS_LAST
+1	6	9	0	sort_key_1	ASC	NULLS_LAST
+1	6	9	1	sort_key_2	ASC	NULLS_LAST
+1	9	10	0	concat(sort_key_1, '_', sort_key_2)	ASC	NULLS_LAST
+1	10	NULL	0	sort_key_1	ASC	NULLS_LAST
+1	10	NULL	1	sort_key_2	ASC	NULLS_LAST
 
 
 statement ok
@@ -202,12 +207,15 @@ WHERE
 t.table_name = 'sort_on_compaction'
 ORDER BY ALL
 ----
-1	6	7	0	sort_key_1	ASC	NULLS_LAST
-1	6	7	1	sort_key_2	ASC	NULLS_LAST
-1	7	8	0	sort_key_1	DESC	NULLS_LAST
-1	7	8	1	sort_key_2	DESC	NULLS_LAST
-1	8	11	0	sort_key_1	ASC	NULLS_LAST
-1	8	11	1	sort_key_2	ASC	NULLS_LAST
+1	4	5	0	sort_key_1	ASC	NULLS_LAST
+1	4	5	1	sort_key_2	ASC	NULLS_LAST
+1	5	6	0	sort_key_1	DESC	NULLS_LAST
+1	5	6	1	sort_key_2	DESC	NULLS_LAST
+1	6	9	0	sort_key_1	ASC	NULLS_LAST
+1	6	9	1	sort_key_2	ASC	NULLS_LAST
+1	9	10	0	concat(sort_key_1, '_', sort_key_2)	ASC	NULLS_LAST
+1	10	11	0	sort_key_1	ASC	NULLS_LAST
+1	10	11	1	sort_key_2	ASC	NULLS_LAST
 
 statement ok
 CALL ducklake_expire_snapshots('ducklake', older_than => now());
