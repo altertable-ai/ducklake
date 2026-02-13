@@ -118,6 +118,8 @@ string ToSQLString(DuckLakeMetadataManager &metadata_manager, const Value &value
 	case LogicalTypeId::INTERVAL:
 	case LogicalTypeId::BLOB:
 		return "'" + value.ToString() + "'::" + value_type;
+	case LogicalTypeId::GEOMETRY:
+		return "'" + value.ToString() + "'::" + value_type;
 	case LogicalTypeId::VARCHAR:
 	case LogicalTypeId::ENUM: {
 		auto str_val = value.ToString();
