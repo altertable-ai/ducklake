@@ -376,7 +376,7 @@ string GetPartitionColumnName(ColumnRefExpression &colref) {
 }
 
 void DuckLakeTableEntry::ValidateSortExpressionColumns(DuckLakeTableEntry &table,
-                                                        const vector<reference<ParsedExpression>> &expressions) {
+                                                       const vector<reference<ParsedExpression>> &expressions) {
 	vector<string> missing_columns;
 	for (auto &expr : expressions) {
 		ParsedExpressionIterator::VisitExpression<ColumnRefExpression>(
