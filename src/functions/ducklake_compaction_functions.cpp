@@ -286,6 +286,10 @@ void DuckLakeCompactor::GenerateCompactions(DuckLakeTableEntry &table,
 				break;
 			}
 		}
+		// Check if we've reached the global limit across all partitions
+		if (compacted_files >= options.max_files) {
+			break;
+		}
 	}
 }
 
