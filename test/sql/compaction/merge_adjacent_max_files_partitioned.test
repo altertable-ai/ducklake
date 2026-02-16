@@ -1,0 +1,96 @@
+# name: test/sql/compaction/merge_adjacent_max_files_partitioned.test
+# description: test ducklake merge adjacent files max_compacted_files option with partitioned tables
+# group: [compaction]
+
+require ducklake
+
+require parquet
+
+test-env DUCKLAKE_CONNECTION __TEST_DIR__/{UUID}.db
+
+test-env DATA_PATH __TEST_DIR__
+
+statement ok
+ATTACH 'ducklake:${DUCKLAKE_CONNECTION}' AS ducklake (DATA_PATH '${DATA_PATH}/merge_adjacent_max_files_partitioned/')
+
+statement ok
+USE ducklake;
+
+statement ok
+CREATE TABLE example (part_key INTEGER, value INTEGER);
+
+statement ok
+ALTER TABLE example SET PARTITIONED BY (part_key);
+
+# Generate 2 files in partition 1
+statement ok
+INSERT INTO example VALUES (1, 1);
+
+statement ok
+INSERT INTO example VALUES (1, 2);
+
+# Generate 2 files in partition 2
+statement ok
+INSERT INTO example VALUES (2, 10);
+
+statement ok
+INSERT INTO example VALUES (2, 20);
+
+# Generate 2 files in partition 3
+statement ok
+INSERT INTO example VALUES (3, 100);
+
+statement ok
+INSERT INTO example VALUES (3, 200);
+
+# Verify we have 6 files total (2 per partition)
+query I
+SELECT COUNT(*) FROM __ducklake_metadata_ducklake.ducklake_data_file WHERE end_snapshot IS NULL
+----
+6
+
+# Compact with max_compacted_files => 1
+# This should create only 1 new compacted file (in one partition), not 3 (one per partition)
+statement ok
+CALL ducklake_merge_adjacent_files('ducklake', 'example', max_compacted_files=>1);
+
+# We should have 5 active files: 4 original (from 2 untouched partitions) + 1 new compacted file
+query I
+SELECT COUNT(*) FROM __ducklake_metadata_ducklake.ducklake_data_file WHERE end_snapshot IS NULL
+----
+5
+
+# Compact with max_compacted_files => 2
+# This should create 2 more compacted files (in the remaining two partitions)
+statement ok
+CALL ducklake_merge_adjacent_files('ducklake', 'example', max_compacted_files=>2);
+
+# We should have 3 active files: all partitions compacted
+query I
+SELECT COUNT(*) FROM __ducklake_metadata_ducklake.ducklake_data_file WHERE end_snapshot IS NULL
+----
+3
+
+# Cleanup old files
+statement ok
+CALL ducklake_cleanup_old_files('ducklake', cleanup_all => true);
+
+# After cleanup, we should still have exactly 3 files (one per partition)
+query I
+SELECT COUNT(*) FROM __ducklake_metadata_ducklake.ducklake_data_file WHERE end_snapshot IS NULL
+----
+3
+
+# Verify data integrity across all partitions
+query II
+SELECT part_key, SUM(value) FROM example GROUP BY part_key ORDER BY part_key
+----
+1	3
+2	30
+3	300
+
+# Verify row count
+query I
+SELECT COUNT(*) FROM example
+----
+6
