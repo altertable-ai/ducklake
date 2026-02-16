@@ -59,6 +59,25 @@ virtual_column_map_t DuckLakeVirtualColumns(ClientContext &context, optional_ptr
 	return result;
 }
 
+static InsertionOrderPreservingMap<string> DuckLakeFunctionDynamicToString(TableFunctionDynamicToStringInput &input) {
+	auto &gstate = input.global_state->Cast<MultiFileGlobalState>();
+
+	// Base implementation from MultiFileFunction::MultiFileDynamicToString
+	InsertionOrderPreservingMap<string> result;
+	result.insert(make_pair("Total Files Read", std::to_string(gstate.file_index.load())));
+
+	// Additional stats especially important within DuckLake's case
+	idx_t files_scanned = 0;
+	for (auto &reader_data : gstate.readers) {
+		if (reader_data->file_state != MultiFileFileState::SKIPPED &&
+		    reader_data->file_state != MultiFileFileState::UNOPENED) {
+			files_scanned++;
+		}
+	}
+	result.insert(make_pair("Total Files Scanned", std::to_string(files_scanned)));
+	return result;
+}
+
 vector<column_t> DuckLakeGetRowIdColumn(ClientContext &context, optional_ptr<FunctionData> bind_data) {
 	vector<column_t> result;
 	result.emplace_back(MultiFileReader::COLUMN_IDENTIFIER_FILENAME);
@@ -90,6 +109,7 @@ TableFunction DuckLakeFunctions::GetDuckLakeScanFunction(DatabaseInstance &insta
 	function.deserialize = nullptr;
 
 	function.to_string = DuckLakeFunctionToString;
+	function.dynamic_to_string = DuckLakeFunctionDynamicToString;
 
 	function.name = "ducklake_scan";
 	return function;
