@@ -67,6 +67,7 @@ private:
 	void GetFilesForTable();
 	void GetTableInsertions();
 	void GetTableDeletions();
+	void AddFilterToPushdownInfo(FilterPushdownInfo &pushdown_info, column_t column_id, unique_ptr<TableFilter> filter) const;
 
 private:
 	mutex file_lock;
