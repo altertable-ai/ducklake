@@ -555,9 +555,7 @@ LogicalType DuckLakeParquetTypeChecker::DeriveLogicalType(const ParquetColumn &s
 		} else if (StringUtil::StartsWith(s_ele.logical_type, "UUIDType()")) {
 			return LogicalType::UUID;
 		} else if (StringUtil::StartsWith(s_ele.logical_type, "Geometry")) {
-			LogicalType geo_type(LogicalTypeId::BLOB);
-			geo_type.SetAlias("GEOMETRY");
-			return geo_type;
+			return LogicalType::GEOMETRY();
 		}
 	}
 	if (!s_ele.converted_type.empty()) {
@@ -772,8 +770,8 @@ void DuckLakeParquetTypeChecker::CheckMatchingType() {
 		return;
 	}
 
-	if (DuckLakeTypes::IsGeoType(type)) {
-		if (!DuckLakeTypes::IsGeoType(source_type)) {
+	if (type.id() == LogicalTypeId::GEOMETRY) {
+		if (source_type.id() != LogicalTypeId::GEOMETRY) {
 			failures.push_back(StringUtil::Format(
 			    "Expected type \"GEOMETRY\" but found type \"%s\". Is this a GeoParquet v1.*.* file? DuckLake only "
 			    "supports GEOMETRY types stored in native Parquet(V3) format, not GeoParquet(v1.*.*)",

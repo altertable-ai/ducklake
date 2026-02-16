@@ -2577,11 +2577,21 @@ void DuckLakeTransaction::DropEntry(CatalogEntry &entry) {
 		DropView(entry.Cast<DuckLakeViewEntry>());
 		break;
 	case CatalogType::MACRO_ENTRY:
-		DropScalarMacro(entry.Cast<DuckLakeScalarMacroEntry>());
+	case CatalogType::TABLE_MACRO_ENTRY: {
+		auto local_entry = GetTransactionLocalEntry(entry.type, entry.ParentSchema().name, entry.name);
+		if (local_entry) {
+			auto schema_entry = new_macros.find(entry.ParentSchema().name);
+			if (schema_entry == new_macros.end()) {
+				throw InternalException("Dropping a transaction local macro that does not exist.");
+			}
+			schema_entry->second->DropEntry(entry.name);
+		} else if (entry.type == CatalogType::MACRO_ENTRY) {
+			DropScalarMacro(entry.Cast<DuckLakeScalarMacroEntry>());
+		} else {
+			DropTableMacro(entry.Cast<DuckLakeTableMacroEntry>());
+		}
 		break;
-	case CatalogType::TABLE_MACRO_ENTRY:
-		DropTableMacro(entry.Cast<DuckLakeTableMacroEntry>());
-		break;
+	}
 	case CatalogType::SCHEMA_ENTRY:
 		DropSchema(entry.Cast<DuckLakeSchemaEntry>());
 		break;
