@@ -50,11 +50,18 @@ DuckLakeMultiFileList::DuckLakeMultiFileList(DuckLakeFunctionInfo &read_info,
 	inlined_data_tables.push_back(inlined_table);
 }
 
-unique_ptr<MultiFileList> DuckLakeMultiFileList::ComplexFilterPushdown(ClientContext &context,
-                                                                       const MultiFileOptions &options,
-                                                                       MultiFilePushdownInfo &info,
-                                                                       vector<unique_ptr<Expression>> &filters) {
-	return nullptr;
+void DuckLakeMultiFileList::AddFilterToPushdownInfo(FilterPushdownInfo &pushdown_info, column_t column_id,
+                                                    unique_ptr<TableFilter> filter) const {
+	if (IsVirtualColumn(column_id)) {
+		return;
+	}
+	auto column_index = PhysicalIndex(column_id);
+	auto &root_id = read_info.table.GetFieldId(column_index);
+	auto field_index = root_id.GetFieldIndex().index;
+	// Get the column type from the table schema, not from the scan types array
+	const auto &column_type = read_info.column_types[column_index.index];
+	ColumnFilterInfo filter_info_entry(field_index, column_type, std::move(filter));
+	pushdown_info.column_filters.emplace(field_index, std::move(filter_info_entry));
 }
 
 unique_ptr<MultiFileList>
@@ -69,28 +76,45 @@ DuckLakeMultiFileList::DynamicFilterPushdown(ClientContext &context, const Multi
 	auto pushdown_info = make_uniq<FilterPushdownInfo>();
 
 	for (auto &entry : filters.filters) {
-		auto column_index_val = entry.first;
-		idx_t column_idx = column_index_val;
-		auto column_id = column_ids[column_idx];
-
-		if (IsVirtualColumn(column_id)) {
-			continue;
-		}
-
-		auto column_index = PhysicalIndex(column_id);
-		auto &root_id = read_info.table.GetFieldId(column_index);
-		auto field_index = root_id.GetFieldIndex().index;
-
-		auto filter_copy = entry.second->Copy();
-		// Get the column type from the table schema, not from the scan types array
-		const auto &column_type = read_info.column_types[column_index.index];
-
-		ColumnFilterInfo filter_info(field_index, column_type, std::move(filter_copy));
-		pushdown_info->column_filters.emplace(field_index, std::move(filter_info));
+		auto column_id = column_ids[entry.first];
+		AddFilterToPushdownInfo(*pushdown_info, column_id, entry.second->Copy());
 	}
 
 	if (pushdown_info->column_filters.empty()) {
 		// no pushdown possible
+		return nullptr;
+	}
+
+	return make_uniq<DuckLakeMultiFileList>(read_info, transaction_local_files, transaction_local_data,
+	                                        std::move(pushdown_info));
+}
+
+unique_ptr<MultiFileList> DuckLakeMultiFileList::ComplexFilterPushdown(ClientContext &context,
+                                                                       const MultiFileOptions &options,
+                                                                       MultiFilePushdownInfo &info,
+                                                                       vector<unique_ptr<Expression>> &filters) {
+	if (read_info.scan_type != DuckLakeScanType::SCAN_TABLE || filters.empty()) {
+		return nullptr;
+	}
+
+	FilterCombiner combiner(context);
+	for (auto &filter : filters) {
+		combiner.AddFilter(filter->Copy());
+	}
+	vector<FilterPushdownResult> pushdown_results;
+	auto table_filter_set = combiner.GenerateTableScanFilters(info.column_indexes, pushdown_results);
+
+	if (table_filter_set.filters.empty()) {
+		return nullptr;
+	}
+
+	auto pushdown_info = filter_info ? filter_info->Copy() : make_uniq<FilterPushdownInfo>();
+
+	for (auto &entry : table_filter_set.filters) {
+		AddFilterToPushdownInfo(*pushdown_info, entry.first, std::move(entry.second));
+	}
+
+	if (pushdown_info->column_filters.empty()) {
 		return nullptr;
 	}
 

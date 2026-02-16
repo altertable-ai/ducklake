@@ -85,3 +85,25 @@ query II
 EXPLAIN ANALYZE SELECT * FROM ducklake.events ORDER BY timestamp DESC NULLS FIRST LIMIT 1
 ----
 analyzed_plan	<REGEX>:.*1,800 rows.*
+
+# Test Top-N pruning with partitioned table - should only read files from matching partitions
+statement ok
+CREATE TABLE ducklake.partitioned_events(part_key INTEGER, timestamp TIMESTAMP);
+
+statement ok
+ALTER TABLE ducklake.partitioned_events SET PARTITIONED BY (part_key);
+
+# Insert 1 row per partition with different timestamps
+statement ok
+INSERT INTO ducklake.partitioned_events VALUES (1, TIMESTAMP '2026-01-01 00:00:00');
+
+statement ok
+INSERT INTO ducklake.partitioned_events VALUES (2, TIMESTAMP '2026-01-02 00:00:00');
+
+# Top-N query filtering to a specific partition - should only read files from that partition
+# The main TABLE_SCAN (reading part_key, timestamp, user_id) should only read 1 file from the matching partition
+query II
+EXPLAIN ANALYZE SELECT * FROM ducklake.partitioned_events WHERE part_key = 2 ORDER BY timestamp DESC LIMIT 1
+----
+analyzed_plan	<REGEX>:.*TABLE_SCAN.*Total Files Read: 1.*TABLE_SCAN.*Total Files Read: 1.*
+
