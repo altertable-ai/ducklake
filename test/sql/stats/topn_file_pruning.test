@@ -107,3 +107,9 @@ EXPLAIN ANALYZE SELECT * FROM ducklake.partitioned_events WHERE part_key = 2 ORD
 ----
 analyzed_plan	<REGEX>:.*TABLE_SCAN.*Total Files Read: 1.*TABLE_SCAN.*Total Files Read: 1.*
 
+# Top-N query on the partition key should only scan 1 file from the matching partition out of the 2
+query II
+EXPLAIN ANALYZE SELECT * FROM ducklake.partitioned_events ORDER BY part_key DESC LIMIT 1
+----
+analyzed_plan	<REGEX>:.*TABLE_SCAN.*Total Files Read: 2.*Total Files Scanned:.*1.*TABLE_SCAN.*Total Files Read: 2.*Total Files Scanned:.*1.*
+
