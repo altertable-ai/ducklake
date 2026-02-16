@@ -130,7 +130,7 @@ public:
 	static TableFunctionSet GetFunctions();
 };
 
-class DuckLakeSettingsFunction : public BaseMetadataFunction {
+class DuckLakeSettingsFunction : public DuckLakeBaseMetadataFunction {
 public:
 	DuckLakeSettingsFunction();
 };
