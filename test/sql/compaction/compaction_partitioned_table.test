@@ -103,7 +103,7 @@ SELECT * FROM ducklake.partitioned AT (VERSION => 5)
 query IIII
 SELECT snapshot_id, rowid, * FROM ducklake.partitioned ORDER BY ALL
 ----
-3	1	1	10
-5	2	1	20
-7	3	2	100
-9	4	2	200
+3	0	1	10
+5	1	1	20
+7	2	2	100
+9	3	2	200

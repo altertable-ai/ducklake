@@ -1392,7 +1392,10 @@ NewDataInfo DuckLakeTransaction::GetNewDataFiles(string &batch_query, DuckLakeCo
 		auto &new_stats = new_globals.stats;
 		vector<DuckLakeDeleteFile> delete_files;
 		for (auto &file : table_changes.new_data_files) {
-			auto data_file = GetNewDataFile(file, commit_state.commit_snapshot, table_id, new_stats.next_row_id);
+			// flushed files (with max_partial_file_snapshot) have embedded row_ids, we gotta use the original row_id_start
+			auto row_id_start = file.flush_row_id_start.IsValid() ? file.flush_row_id_start.GetIndex()
+			                                                      : new_stats.next_row_id;
+			auto data_file = GetNewDataFile(file, commit_state.commit_snapshot, table_id, row_id_start);
 			for (auto &del_file : file.delete_files) {
 				// this transaction-local file already has deletes - write them out
 				DuckLakeDeleteFile delete_file = del_file;

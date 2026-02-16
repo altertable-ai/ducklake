@@ -141,39 +141,39 @@ SELECT * FROM ducklake.test AT (VERSION => 8) ORDER BY ALL
 2
 
 # reading snapshot id and row id
-# After compaction, rowids start at 1 (they get compacted)
+# After compaction, rowids start at 0 (they get compacted)
 query III
 SELECT snapshot_id, rowid, * FROM ducklake.test ORDER BY ALL
 ----
-3	1	1
-7	2	2
-9	3	3
-11	4	4
-13	5	5
+3	0	1
+7	1	2
+9	2	3
+11	3	4
+13	4	5
 
 # table insertions function
 query II
 SELECT rowid, * FROM ducklake_table_insertions('ducklake', 'main', 'test', 0, 4) ORDER BY ALL
 ----
-1	1
+0	1
 
 query II
 SELECT rowid, * FROM ducklake_table_insertions('ducklake', 'main', 'test', 0, 6) ORDER BY ALL
 ----
-1	1
+0	1
 
 query II
 SELECT rowid, * FROM ducklake_table_insertions('ducklake', 'main', 'test', 0, 10) ORDER BY ALL
 ----
-1	1
-2	2
-3	3
+0	1
+1	2
+2	3
 
 query II
 SELECT rowid, * FROM ducklake_table_insertions('ducklake', 'main', 'test', 0, 15) ORDER BY ALL
 ----
-1	1
-2	2
-3	3
-4	4
-5	5
+0	1
+1	2
+2	3
+3	4
+4	5

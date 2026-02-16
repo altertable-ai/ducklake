@@ -67,6 +67,6 @@ SELECT * FROM ducklake.test AT (VERSION => 2)
 query II
 SELECT rowid, * FROM ducklake.test ORDER BY ALL
 ----
-1	1
-2	2
-3	3
+0	1
+1	2
+2	3

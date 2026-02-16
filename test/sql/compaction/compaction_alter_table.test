@@ -141,8 +141,8 @@ SELECT COUNT(*) FROM GLOB('${DATA_PATH}/ducklake_compaction_alter_files/**/*')
 query IIII
 SELECT snapshot_id, rowid, * FROM ducklake.test AT (VERSION => 5) ORDER BY ALL
 ----
-2	1	1	10
-4	2	2	20
+2	0	1	10
+4	1	2	20
 
 # VERSION => 10 has snapshots 1-10
 # Schema after alter(6) is (id, i, j)
@@ -150,10 +150,10 @@ SELECT snapshot_id, rowid, * FROM ducklake.test AT (VERSION => 5) ORDER BY ALL
 query IIIII
 SELECT snapshot_id, rowid, * FROM ducklake.test AT (VERSION => 10) ORDER BY ALL
 ----
-2	1	1	10	NULL
-4	2	2	20	NULL
-7	3	3	30	300
-9	4	4	40	400
+2	0	1	10	NULL
+4	1	2	20	NULL
+7	2	3	30	300
+9	3	4	40	400
 
 # VERSION => 15 has snapshots 1-15
 # Schema after alter(11) is (id, j) - i column dropped
@@ -161,22 +161,22 @@ SELECT snapshot_id, rowid, * FROM ducklake.test AT (VERSION => 10) ORDER BY ALL
 query IIII
 SELECT snapshot_id, rowid, * FROM ducklake.test AT (VERSION => 15) ORDER BY ALL
 ----
-2	1	1	NULL
-4	2	2	NULL
-7	3	3	300
-9	4	4	400
-12	5	5	500
-14	6	6	600
+2	0	1	NULL
+4	1	2	NULL
+7	2	3	300
+9	3	4	400
+12	4	5	500
+14	5	6	600
 
-# Current state (rowids are now 1-based after compaction)
+# Current state (rowids are now 0-based after compaction)
 query IIIII
 SELECT snapshot_id, rowid, * FROM ducklake.test ORDER BY ALL
 ----
-2	1	1	NULL	NULL
-4	2	2	NULL	NULL
-7	3	3	300	NULL
-9	4	4	400	NULL
-12	5	5	500	NULL
-14	6	6	600	NULL
-17	7	7	700	hello
-19	8	8	800	world
+2	0	1	NULL	NULL
+4	1	2	NULL	NULL
+7	2	3	300	NULL
+9	3	4	400	NULL
+12	4	5	500	NULL
+14	5	6	600	NULL
+17	6	7	700	hello
+19	7	8	800	world

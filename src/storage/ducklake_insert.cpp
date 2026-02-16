@@ -150,6 +150,13 @@ void DuckLakeInsert::AddWrittenFiles(DuckLakeInsertGlobalState &global_state, Da
 				continue;
 			}
 			if (column_names[0] == "_ducklake_internal_row_id") {
+				if (set_snapshot_id) {
+					// extract the min row_id so flushed files preserve the original row_id_start
+					auto row_id_stats = ParseColumnStats(LogicalType::BIGINT, col_stats);
+					if (row_id_stats.has_min) {
+						data_file.flush_row_id_start = StringUtil::ToUnsigned(row_id_stats.min);
+					}
+				}
 				continue;
 			}
 
