@@ -6,6 +6,7 @@
 #include "duckdb/planner/table_filter_state.hpp"
 #include "storage/ducklake_catalog.hpp"
 #include "storage/ducklake_delete_filter.hpp"
+#include "duckdb/common/vector_operations/vector_operations.hpp"
 
 namespace duckdb {
 
@@ -209,7 +210,12 @@ AsyncResult DuckLakeInlinedDataReader::Scan(ClientContext &context, GlobalTableF
 						break;
 					}
 				}
-				chunk.data[c].Reference(scan_chunk.data[column_id]);
+				if (chunk.data[c].GetType() != scan_chunk.data[column_id].GetType()) {
+					// type was changed, we gotta cast the data
+					VectorOperations::Cast(context, scan_chunk.data[column_id], chunk.data[c], scan_chunk.size());
+				} else {
+					chunk.data[c].Reference(scan_chunk.data[column_id]);
+				}
 				break;
 			}
 			case InlinedVirtualColumn::COLUMN_ROW_ID: {
