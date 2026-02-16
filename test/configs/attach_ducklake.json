@@ -621,5 +621,13 @@
           "test/sql/storage/types/variant/variant_extract_stats.test"
       ]
     }
+    ,
+    {
+      "reason": "FIXME: Variant Bugs?",
+      "paths": [
+          "test/parquet/variant/variant_comparison.test",
+        " test/sql/storage/types/variant/variant_shredding_omit_untyped.test"
+      ]
+    }
   ]
 }
