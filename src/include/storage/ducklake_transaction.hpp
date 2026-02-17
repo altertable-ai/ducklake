@@ -188,7 +188,6 @@ protected:
 	}
 
 private:
-	Connection &GetConnectionInternal();
 	void CleanupFiles();
 	void FlushChanges();
 	void FlushSettingChanges();

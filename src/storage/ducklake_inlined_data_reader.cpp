@@ -72,7 +72,7 @@ bool DuckLakeInlinedDataReader::TryInitializeScan(ClientContext &context, Global
 			auto &metadata_type = ducklake_catalog.MetadataType();
 			bool needs_cast = !metadata_type.empty() && metadata_type != "duckdb";
 			if (needs_cast) {
-				// For non-DuckDB metadata backends (e.g. SQLite), data is stored as VARCHAR - cast is required
+				// If it's not a duckdb catalog, we add a cast.
 				if (columns[index].type.id() != LogicalTypeId::VARCHAR) {
 					projected_column = metadata_manager.CastColumnToTarget(projected_column, columns[index].type);
 				}
