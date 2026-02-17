@@ -168,7 +168,8 @@ void DuckLakeOptionsExecute(ClientContext &context, TableFunctionInput &data_p, 
 	output.SetCardinality(count);
 }
 
-DuckLakeOptionsFunction::DuckLakeOptionsFunction() : DuckLakeBaseMetadataFunction("ducklake_options", DuckLakeOptionsBind) {
+DuckLakeOptionsFunction::DuckLakeOptionsFunction()
+    : DuckLakeBaseMetadataFunction("ducklake_options", DuckLakeOptionsBind) {
 	init_global = DuckLakeOptionsInit;
 	function = DuckLakeOptionsExecute;
 }

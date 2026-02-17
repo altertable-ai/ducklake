@@ -44,7 +44,8 @@ static unique_ptr<FunctionData> DuckLakeSettingsBind(ClientContext &context, Tab
 	return std::move(result);
 }
 
-DuckLakeSettingsFunction::DuckLakeSettingsFunction() : DuckLakeBaseMetadataFunction("ducklake_settings", DuckLakeSettingsBind) {
+DuckLakeSettingsFunction::DuckLakeSettingsFunction()
+    : DuckLakeBaseMetadataFunction("ducklake_settings", DuckLakeSettingsBind) {
 }
 
 } // namespace duckdb

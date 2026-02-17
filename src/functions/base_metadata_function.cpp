@@ -29,7 +29,8 @@ struct MetadataFunctionData : public GlobalTableFunctionState {
 	idx_t offset;
 };
 
-static unique_ptr<GlobalTableFunctionState> MetadataFunctionInit(ClientContext &context, TableFunctionInitInput &input) {
+static unique_ptr<GlobalTableFunctionState> MetadataFunctionInit(ClientContext &context,
+                                                                 TableFunctionInitInput &input) {
 	auto result = make_uniq<MetadataFunctionData>();
 	return std::move(result);
 }
