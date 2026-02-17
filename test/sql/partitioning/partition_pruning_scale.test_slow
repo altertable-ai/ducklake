@@ -1,0 +1,108 @@
+# name: test/sql/partitioning/partition_pruning_scale.test_slow
+# description: Test partition pruning at scale (1000 identity files, 365 year/month/day files)
+# group: [partitioning]
+
+require ducklake
+
+require parquet
+
+test-env DUCKLAKE_CONNECTION __TEST_DIR__/{UUID}.db
+
+test-env DATA_PATH __TEST_DIR__
+
+statement ok
+ATTACH 'ducklake:${DUCKLAKE_CONNECTION}' AS ducklake (DATA_PATH '${DATA_PATH}/ducklake_partition_scale', METADATA_CATALOG 'ducklake_metadata')
+
+statement ok
+USE ducklake
+
+# ---------- Identity 1000-file ----------
+
+statement ok
+CREATE TABLE identity_scale(part_key INTEGER, val VARCHAR);
+
+statement ok
+ALTER TABLE identity_scale SET PARTITIONED BY (part_key);
+
+statement ok
+INSERT INTO identity_scale SELECT i % 1000, concat('val_', i) FROM range(100000) t(i)
+
+# verify file count
+query I
+SELECT COUNT(*) FROM ducklake_metadata.ducklake_data_file WHERE table_id = (SELECT table_id FROM ducklake_metadata.ducklake_table WHERE table_name = 'identity_scale')
+----
+1000
+
+# identity equality pruning: point lookup prunes to 1 file
+query II
+EXPLAIN ANALYZE SELECT COUNT(*) FROM identity_scale WHERE part_key = 42
+----
+analyzed_plan	<REGEX>:.*Total Files Read: 1.*
+
+query I
+SELECT COUNT(*) FROM identity_scale WHERE part_key = 42
+----
+100
+
+# range behavior (no identity-range partition pruning — file-stats only)
+query II
+EXPLAIN ANALYZE SELECT COUNT(*) FROM identity_scale WHERE part_key > 500
+----
+analyzed_plan	<REGEX>:.*Total Files Read: 499.*
+
+query I
+SELECT COUNT(*) FROM identity_scale WHERE part_key > 500
+----
+49900
+
+# full scan correctness
+query I
+SELECT COUNT(*) FROM identity_scale
+----
+100000
+
+# ---------- Year/Month/Day 365-file ----------
+
+statement ok
+CREATE TABLE ymd_scale(id INTEGER, ts TIMESTAMP, val VARCHAR);
+
+statement ok
+ALTER TABLE ymd_scale SET PARTITIONED BY (year(ts), month(ts), day(ts));
+
+# 8760 hours = 365 days of hourly data (2023 is not a leap year)
+statement ok
+INSERT INTO ymd_scale SELECT i, TIMESTAMP '2023-01-01' + interval (i) hours, concat('val_', i) FROM range(8760) t(i)
+
+# verify file count
+query I
+SELECT COUNT(*) FROM ducklake_metadata.ducklake_data_file WHERE table_id = (SELECT table_id FROM ducklake_metadata.ducklake_table WHERE table_name = 'ymd_scale')
+----
+365
+
+# point lookup prunes to 1 file
+query II
+EXPLAIN ANALYZE SELECT COUNT(*) FROM ymd_scale WHERE ts = TIMESTAMP '2023-06-15 12:00:00'
+----
+analyzed_plan	<REGEX>:.*Total Files Read: 1.*
+
+query I
+SELECT COUNT(*) FROM ymd_scale WHERE ts = TIMESTAMP '2023-06-15 12:00:00'
+----
+1
+
+# day range prunes to 1 file
+query II
+EXPLAIN ANALYZE SELECT COUNT(*) FROM ymd_scale WHERE ts >= TIMESTAMP '2023-06-15' AND ts < TIMESTAMP '2023-06-16'
+----
+analyzed_plan	<REGEX>:.*Total Files Read: 1.*
+
+query I
+SELECT COUNT(*) FROM ymd_scale WHERE ts >= TIMESTAMP '2023-06-15' AND ts < TIMESTAMP '2023-06-16'
+----
+24
+
+# full scan correctness
+query I
+SELECT COUNT(*) FROM ymd_scale
+----
+8760

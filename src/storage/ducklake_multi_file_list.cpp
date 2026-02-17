@@ -19,9 +19,134 @@
 #include "duckdb/planner/filter/null_filter.hpp"
 #include "duckdb/planner/filter/optional_filter.hpp"
 #include "duckdb/planner/filter/in_filter.hpp"
+#include "duckdb/common/types/date.hpp"
+#include "duckdb/common/types/time.hpp"
 #include "storage/ducklake_table_entry.hpp"
 
 namespace duckdb {
+
+static void ExtractConstantFilters(const TableFilter &filter, vector<pair<ExpressionType, Value>> &results) {
+	switch (filter.filter_type) {
+	case TableFilterType::CONSTANT_COMPARISON: {
+		auto &constant = filter.Cast<ConstantFilter>();
+		results.emplace_back(constant.comparison_type, constant.constant);
+		break;
+	}
+	case TableFilterType::CONJUNCTION_AND: {
+		auto &conjunction = filter.Cast<ConjunctionAndFilter>();
+		for (auto &child : conjunction.child_filters) {
+			ExtractConstantFilters(*child, results);
+		}
+		break;
+	}
+	case TableFilterType::OPTIONAL_FILTER: {
+		auto &optional = filter.Cast<OptionalFilter>();
+		if (optional.child_filter) {
+			ExtractConstantFilters(*optional.child_filter, results);
+		}
+		break;
+	}
+	default:
+		break;
+	}
+}
+
+struct TransformResult {
+	string transformed_value;
+	ExpressionType adjusted_comparison;
+};
+
+static bool TryCastToTimestamp(const Value &constant, timestamp_t &result) {
+	Value ts_val;
+	if (!constant.DefaultTryCastAs(LogicalType::TIMESTAMP, ts_val, nullptr)) {
+		return false;
+	}
+	result = ts_val.GetValue<timestamp_t>();
+	return true;
+}
+
+static bool TryApplyTransform(DuckLakeTransformType transform, const Value &constant, ExpressionType comparison,
+                              TransformResult &out) {
+	switch (transform) {
+	case DuckLakeTransformType::YEAR: {
+		timestamp_t ts;
+		if (!TryCastToTimestamp(constant, ts)) {
+			return false;
+		}
+		int32_t year, month, day;
+		Date::Convert(Timestamp::GetDate(ts), year, month, day);
+		switch (comparison) {
+		case ExpressionType::COMPARE_EQUAL:
+			out.adjusted_comparison = ExpressionType::COMPARE_EQUAL;
+			break;
+		case ExpressionType::COMPARE_GREATERTHAN:
+		case ExpressionType::COMPARE_GREATERTHANOREQUALTO:
+			out.adjusted_comparison = ExpressionType::COMPARE_GREATERTHANOREQUALTO;
+			break;
+		case ExpressionType::COMPARE_LESSTHAN:
+		case ExpressionType::COMPARE_LESSTHANOREQUALTO:
+			out.adjusted_comparison = ExpressionType::COMPARE_LESSTHANOREQUALTO;
+			break;
+		default:
+			return false;
+		}
+		out.transformed_value = to_string(year);
+		return true;
+	}
+	case DuckLakeTransformType::MONTH: {
+		if (comparison != ExpressionType::COMPARE_EQUAL) {
+			return false;
+		}
+		timestamp_t ts;
+		if (!TryCastToTimestamp(constant, ts)) {
+			return false;
+		}
+		int32_t year, month, day;
+		Date::Convert(Timestamp::GetDate(ts), year, month, day);
+		out.transformed_value = to_string(month);
+		out.adjusted_comparison = ExpressionType::COMPARE_EQUAL;
+		return true;
+	}
+	case DuckLakeTransformType::DAY: {
+		if (comparison != ExpressionType::COMPARE_EQUAL) {
+			return false;
+		}
+		timestamp_t ts;
+		if (!TryCastToTimestamp(constant, ts)) {
+			return false;
+		}
+		int32_t year, month, day;
+		Date::Convert(Timestamp::GetDate(ts), year, month, day);
+		out.transformed_value = to_string(day);
+		out.adjusted_comparison = ExpressionType::COMPARE_EQUAL;
+		return true;
+	}
+	case DuckLakeTransformType::HOUR: {
+		if (comparison != ExpressionType::COMPARE_EQUAL) {
+			return false;
+		}
+		timestamp_t ts;
+		if (!TryCastToTimestamp(constant, ts)) {
+			return false;
+		}
+		int32_t hour, min, sec, micros;
+		Time::Convert(Timestamp::GetTime(ts), hour, min, sec, micros);
+		out.transformed_value = to_string(hour);
+		out.adjusted_comparison = ExpressionType::COMPARE_EQUAL;
+		return true;
+	}
+	case DuckLakeTransformType::IDENTITY: {
+		if (comparison != ExpressionType::COMPARE_EQUAL) {
+			return false;
+		}
+		out.transformed_value = constant.ToString();
+		out.adjusted_comparison = ExpressionType::COMPARE_EQUAL;
+		return true;
+	}
+	default:
+		return false;
+	}
+}
 
 DuckLakeMultiFileList::DuckLakeMultiFileList(DuckLakeFunctionInfo &read_info,
                                              vector<DuckLakeDataFile> transaction_local_files_p,
@@ -79,7 +204,103 @@ DuckLakeMultiFileList::DynamicFilterPushdown(ClientContext &context, const Multi
 		pushdown_info->column_filters.emplace(field_index, std::move(filter_info));
 	}
 
-	if (pushdown_info->column_filters.empty()) {
+	// Derive partition filters from column filters
+	auto partition_data = read_info.table.GetPartitionData();
+	if (partition_data) {
+		// Map from field_id to the set of transform types that have equality filters
+		map<idx_t, set<DuckLakeTransformType>> field_equality_transforms;
+
+		// Pass 1: Process YEAR and IDENTITY transforms (no prerequisites)
+		for (auto &pf : partition_data->fields) {
+			auto field_id = pf.field_id.index;
+			auto it = pushdown_info->column_filters.find(field_id);
+			if (it == pushdown_info->column_filters.end()) {
+				continue;
+			}
+			auto transform_type = pf.transform.type;
+			if (transform_type != DuckLakeTransformType::YEAR && transform_type != DuckLakeTransformType::IDENTITY) {
+				continue;
+			}
+			vector<pair<ExpressionType, Value>> constant_filters;
+			ExtractConstantFilters(*it->second.table_filter, constant_filters);
+			for (auto &cf_entry : constant_filters) {
+				auto &comp = cf_entry.first;
+				auto &val = cf_entry.second;
+				TransformResult result;
+				if (TryApplyTransform(transform_type, val, comp, result)) {
+					pushdown_info->partition_filters.emplace_back(pf.partition_key_index, transform_type,
+					                                             result.transformed_value,
+					                                             result.adjusted_comparison);
+					if (result.adjusted_comparison == ExpressionType::COMPARE_EQUAL) {
+						field_equality_transforms[field_id].insert(transform_type);
+					}
+				}
+			}
+		}
+
+		// Pass 2: Process MONTH, DAY, HOUR transforms (require prerequisites)
+		// Process in dependency order: MONTH first, then DAY, then HOUR
+		DuckLakeTransformType ordered_transforms[] = {DuckLakeTransformType::MONTH, DuckLakeTransformType::DAY,
+		                                              DuckLakeTransformType::HOUR};
+		for (auto target_transform : ordered_transforms) {
+			for (auto &pf : partition_data->fields) {
+				if (pf.transform.type != target_transform) {
+					continue;
+				}
+				auto field_id = pf.field_id.index;
+				auto it = pushdown_info->column_filters.find(field_id);
+				if (it == pushdown_info->column_filters.end()) {
+					continue;
+				}
+				bool has_prereqs = false;
+				switch (target_transform) {
+				case DuckLakeTransformType::MONTH: {
+					auto eq_it = field_equality_transforms.find(field_id);
+					has_prereqs = eq_it != field_equality_transforms.end() &&
+					              eq_it->second.count(DuckLakeTransformType::YEAR);
+					break;
+				}
+				case DuckLakeTransformType::DAY: {
+					auto eq_it = field_equality_transforms.find(field_id);
+					has_prereqs = eq_it != field_equality_transforms.end() &&
+					              eq_it->second.count(DuckLakeTransformType::YEAR) &&
+					              eq_it->second.count(DuckLakeTransformType::MONTH);
+					break;
+				}
+				case DuckLakeTransformType::HOUR: {
+					auto eq_it = field_equality_transforms.find(field_id);
+					has_prereqs = eq_it != field_equality_transforms.end() &&
+					              eq_it->second.count(DuckLakeTransformType::YEAR) &&
+					              eq_it->second.count(DuckLakeTransformType::MONTH) &&
+					              eq_it->second.count(DuckLakeTransformType::DAY);
+					break;
+				}
+				default:
+					break;
+				}
+				if (!has_prereqs) {
+					continue;
+				}
+				vector<pair<ExpressionType, Value>> constant_filters;
+				ExtractConstantFilters(*it->second.table_filter, constant_filters);
+				for (auto &cf_entry : constant_filters) {
+					auto &comp = cf_entry.first;
+					auto &val = cf_entry.second;
+					TransformResult result;
+					if (TryApplyTransform(target_transform, val, comp, result)) {
+						pushdown_info->partition_filters.emplace_back(pf.partition_key_index, target_transform,
+						                                             result.transformed_value,
+						                                             result.adjusted_comparison);
+						if (result.adjusted_comparison == ExpressionType::COMPARE_EQUAL) {
+							field_equality_transforms[field_id].insert(target_transform);
+						}
+					}
+				}
+			}
+		}
+	}
+
+	if (pushdown_info->column_filters.empty() && pushdown_info->partition_filters.empty()) {
 		// no pushdown possible
 		return nullptr;
 	}

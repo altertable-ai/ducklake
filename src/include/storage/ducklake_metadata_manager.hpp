@@ -72,8 +72,20 @@ struct ColumnFilterInfo {
 	}
 };
 
+struct PartitionFilterInfo {
+	idx_t partition_key_index;
+	DuckLakeTransformType transform;
+	string transformed_value;
+	ExpressionType comparison_type;
+
+	PartitionFilterInfo(idx_t key_idx, DuckLakeTransformType t, string val, ExpressionType comp)
+	    : partition_key_index(key_idx), transform(t), transformed_value(std::move(val)), comparison_type(comp) {
+	}
+};
+
 struct FilterPushdownInfo {
 	unordered_map<idx_t, ColumnFilterInfo> column_filters;
+	vector<PartitionFilterInfo> partition_filters;
 
 	FilterPushdownInfo() = default;
 
@@ -82,6 +94,7 @@ struct FilterPushdownInfo {
 		for (const auto &entry : column_filters) {
 			result->column_filters.emplace(entry.first, entry.second);
 		}
+		result->partition_filters = partition_filters;
 		return result;
 	}
 };
@@ -277,6 +290,7 @@ private:
 	string GetFileSelectList(const string &prefix);
 	FilterPushdownQueryComponents GenerateFilterPushdownComponents(const FilterPushdownInfo &filter_info,
 	                                                               TableIndex table_id);
+	string GeneratePartitionPruningSQL(const vector<PartitionFilterInfo> &partition_filters, TableIndex table_id);
 	virtual FilterSQLResult ConvertFilterPushdownToSQL(const FilterPushdownInfo &filter_info);
 	virtual string GenerateCTESectionFromRequirements(const unordered_map<idx_t, CTERequirement> &requirements,
 	                                                  TableIndex table_id);

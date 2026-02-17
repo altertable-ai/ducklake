@@ -1,0 +1,255 @@
+# name: test/sql/partitioning/partition_transform_pruning.test
+# description: Test partition transform pruning at runtime
+# group: [partitioning]
+
+require ducklake
+
+require parquet
+
+test-env DUCKLAKE_CONNECTION __TEST_DIR__/{UUID}.db
+
+test-env DATA_PATH __TEST_DIR__
+
+statement ok
+ATTACH 'ducklake:${DUCKLAKE_CONNECTION}' AS ducklake (DATA_PATH '${DATA_PATH}/ducklake_partition_prune', METADATA_CATALOG 'ducklake_metadata')
+
+statement ok
+USE ducklake
+
+# year pruning
+
+statement ok
+CREATE TABLE year_prune(id INTEGER, ts TIMESTAMP, val VARCHAR);
+
+statement ok
+ALTER TABLE year_prune SET PARTITIONED BY (year(ts));
+
+# data spans 2020 and 2021
+statement ok
+INSERT INTO year_prune SELECT i, TIMESTAMP '2020-01-01' + interval (i) hours, concat('val_', i) FROM range(10000) t(i)
+
+# verify file count
+query I
+SELECT COUNT(*) FROM ducklake_metadata.ducklake_data_file WHERE table_id = (SELECT table_id FROM ducklake_metadata.ducklake_table WHERE table_name = 'year_prune')
+----
+2
+
+# verify pruning
+query II
+EXPLAIN ANALYZE SELECT COUNT(*) FROM year_prune WHERE ts >= TIMESTAMP '2021-01-01'
+----
+analyzed_plan	<REGEX>:.*Total Files Read: 1.*
+
+# verify result
+query I
+SELECT COUNT(*) FROM year_prune WHERE ts >= TIMESTAMP '2021-01-01'
+----
+1216
+
+# year range pruning
+
+# verify pruning
+query II
+EXPLAIN ANALYZE SELECT COUNT(*) FROM year_prune WHERE ts >= TIMESTAMP '2020-06-01' AND ts < TIMESTAMP '2020-09-01'
+----
+analyzed_plan	<REGEX>:.*Total Files Read: 1.*
+
+# verify result
+query I
+SELECT COUNT(*) FROM year_prune WHERE ts >= TIMESTAMP '2020-06-01' AND ts < TIMESTAMP '2020-09-01'
+----
+2208
+
+# boundary safety
+
+# verify conservative widening
+query II
+EXPLAIN ANALYZE SELECT COUNT(*) FROM year_prune WHERE ts > TIMESTAMP '2020-06-15'
+----
+analyzed_plan	<REGEX>:.*Total Files Read: 2.*
+
+# verify result
+query I
+SELECT COUNT(*) FROM year_prune WHERE ts > TIMESTAMP '2020-06-15'
+----
+6015
+
+# identity pruning
+
+statement ok
+CREATE TABLE identity_prune(part_key INTEGER, val VARCHAR);
+
+statement ok
+ALTER TABLE identity_prune SET PARTITIONED BY (part_key);
+
+statement ok
+INSERT INTO identity_prune SELECT i % 3, concat('val_', i) FROM range(9000) t(i)
+
+# verify pruning
+query II
+EXPLAIN ANALYZE SELECT COUNT(*) FROM identity_prune WHERE part_key = 1
+----
+analyzed_plan	<REGEX>:.*Total Files Read: 1.*
+
+# verify result
+query I
+SELECT COUNT(*) FROM identity_prune WHERE part_key = 1
+----
+3000
+
+# year/month/day equality
+
+statement ok
+CREATE TABLE ymd_prune(id INTEGER, ts TIMESTAMP, val VARCHAR);
+
+statement ok
+ALTER TABLE ymd_prune SET PARTITIONED BY (year(ts), month(ts), day(ts));
+
+# three days of hourly data
+statement ok
+INSERT INTO ymd_prune SELECT i, TIMESTAMP '2023-06-15' + interval (i) hours, concat('val_', i) FROM range(72) t(i)
+
+# verify file count
+query I
+SELECT COUNT(*) FROM ducklake_metadata.ducklake_data_file WHERE table_id = (SELECT table_id FROM ducklake_metadata.ducklake_table WHERE table_name = 'ymd_prune')
+----
+3
+
+# verify pruning
+query II
+EXPLAIN ANALYZE SELECT COUNT(*) FROM ymd_prune WHERE ts = TIMESTAMP '2023-06-16 12:00:00'
+----
+analyzed_plan	<REGEX>:.*Total Files Read: 1.*
+
+query I
+SELECT COUNT(*) FROM ymd_prune WHERE ts = TIMESTAMP '2023-06-16 12:00:00'
+----
+1
+
+# verify range result
+query I
+SELECT COUNT(*) FROM ymd_prune WHERE ts >= TIMESTAMP '2023-06-16' AND ts < TIMESTAMP '2023-06-17'
+----
+24
+
+# full scan correctness
+
+query I
+SELECT COUNT(*) FROM year_prune
+----
+10000
+
+query I
+SELECT COUNT(*) FROM identity_prune
+----
+9000
+
+query I
+SELECT COUNT(*) FROM ymd_prune
+----
+72
+
+# year/month/day/hour equality
+
+statement ok
+CREATE TABLE ymdh_prune(id INTEGER, ts TIMESTAMP, val VARCHAR);
+
+statement ok
+ALTER TABLE ymdh_prune SET PARTITIONED BY (year(ts), month(ts), day(ts), hour(ts));
+
+# one day of hourly data
+statement ok
+INSERT INTO ymdh_prune SELECT i, TIMESTAMP '2023-06-15' + interval (i) hours, concat('val_', i) FROM range(24) t(i)
+
+# verify file count
+query I
+SELECT COUNT(*) FROM ducklake_metadata.ducklake_data_file WHERE table_id = (SELECT table_id FROM ducklake_metadata.ducklake_table WHERE table_name = 'ymdh_prune')
+----
+24
+
+# verify pruning
+query II
+EXPLAIN ANALYZE SELECT COUNT(*) FROM ymdh_prune WHERE ts = TIMESTAMP '2023-06-15 12:00:00'
+----
+analyzed_plan	<REGEX>:.*Total Files Read: 1.*
+
+query I
+SELECT COUNT(*) FROM ymdh_prune WHERE ts = TIMESTAMP '2023-06-15 12:00:00'
+----
+1
+
+# full scan correctness
+query I
+SELECT COUNT(*) FROM ymdh_prune
+----
+24
+
+# identity range safety
+
+statement ok
+CREATE TABLE identity_range_prune(part_key INTEGER, val VARCHAR);
+
+statement ok
+ALTER TABLE identity_range_prune SET PARTITIONED BY (part_key);
+
+# values where varchar and numeric order diverge
+statement ok
+INSERT INTO identity_range_prune SELECT CASE WHEN i < 1000 THEN 1 WHEN i < 2000 THEN 2 ELSE 10 END, concat('val_', i) FROM range(3000) t(i)
+
+# verify file count
+query I
+SELECT COUNT(*) FROM ducklake_metadata.ducklake_data_file WHERE table_id = (SELECT table_id FROM ducklake_metadata.ducklake_table WHERE table_name = 'identity_range_prune')
+----
+3
+
+# verify no varchar range pruning
+query II
+EXPLAIN ANALYZE SELECT COUNT(*) FROM identity_range_prune WHERE part_key < 10
+----
+analyzed_plan	<REGEX>:.*Total Files Read: 2.*
+
+query I
+SELECT COUNT(*) FROM identity_range_prune WHERE part_key < 10
+----
+2000
+
+# verify range results
+query I
+SELECT COUNT(*) FROM identity_prune WHERE part_key > 1
+----
+3000
+
+query I
+SELECT COUNT(*) FROM identity_prune WHERE part_key >= 0 AND part_key <= 1
+----
+6000
+
+# cyclic month safety
+
+statement ok
+CREATE TABLE cyclic_prune(id INTEGER, ts TIMESTAMP, val VARCHAR);
+
+statement ok
+ALTER TABLE cyclic_prune SET PARTITIONED BY (year(ts), month(ts));
+
+# data spans nov 2022 to feb 2023
+statement ok
+INSERT INTO cyclic_prune SELECT i, TIMESTAMP '2022-11-01' + interval (i) days, concat('val_', i) FROM range(120) t(i)
+
+# verify file count
+query I
+SELECT COUNT(*) FROM ducklake_metadata.ducklake_data_file WHERE table_id = (SELECT table_id FROM ducklake_metadata.ducklake_table WHERE table_name = 'cyclic_prune')
+----
+4
+
+# verify no month range derivation
+query II
+EXPLAIN ANALYZE SELECT COUNT(*) FROM cyclic_prune WHERE ts >= TIMESTAMP '2022-11-15'
+----
+analyzed_plan	<REGEX>:.*Total Files Read: 4.*
+
+# verify result
+query I
+SELECT COUNT(*) FROM cyclic_prune WHERE ts >= TIMESTAMP '2022-11-15'
+----
+106

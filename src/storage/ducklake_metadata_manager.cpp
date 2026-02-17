@@ -1223,17 +1223,74 @@ DuckLakeMetadataManager::GenerateCTESectionFromRequirements(const unordered_map<
 	return cte_section + "\n";
 }
 
+string DuckLakeMetadataManager::GeneratePartitionPruningSQL(const vector<PartitionFilterInfo> &partition_filters,
+                                                            TableIndex table_id) {
+	string combined;
+	for (auto &pf : partition_filters) {
+		string condition;
+		if (pf.transform == DuckLakeTransformType::IDENTITY) {
+			// VARCHAR comparison, equality only
+			condition = StringUtil::Format(
+			    "data.data_file_id NOT IN ("
+			    "SELECT data_file_id FROM {METADATA_CATALOG}.ducklake_file_partition_value "
+			    "WHERE table_id = %d AND partition_key_index = %d "
+			    "AND partition_value IS NOT NULL "
+			    "AND NOT (partition_value = %s))",
+			    table_id.index, NumericCast<int64_t>(pf.partition_key_index),
+			    DuckLakeUtil::SQLLiteralToString(pf.transformed_value));
+		} else {
+			// Numeric comparison for YEAR/MONTH/DAY/HOUR
+			string op;
+			switch (pf.comparison_type) {
+			case ExpressionType::COMPARE_EQUAL:
+				op = "=";
+				break;
+			case ExpressionType::COMPARE_GREATERTHANOREQUALTO:
+				op = ">=";
+				break;
+			case ExpressionType::COMPARE_LESSTHANOREQUALTO:
+				op = "<=";
+				break;
+			default:
+				continue;
+			}
+			condition = StringUtil::Format(
+			    "data.data_file_id NOT IN ("
+			    "SELECT data_file_id FROM {METADATA_CATALOG}.ducklake_file_partition_value "
+			    "WHERE table_id = %d AND partition_key_index = %d "
+			    "AND partition_value IS NOT NULL "
+			    "AND NOT (TRY_CAST(partition_value AS BIGINT) %s %s))",
+			    table_id.index, NumericCast<int64_t>(pf.partition_key_index), op, pf.transformed_value);
+		}
+		if (!condition.empty()) {
+			if (!combined.empty()) {
+				combined += " AND ";
+			}
+			combined += condition;
+		}
+	}
+	return combined;
+}
+
 FilterPushdownQueryComponents
 DuckLakeMetadataManager::GenerateFilterPushdownComponents(const FilterPushdownInfo &filter_info, TableIndex table_id) {
 	FilterPushdownQueryComponents result;
 
-	if (filter_info.column_filters.empty()) {
-		return result;
+	if (!filter_info.column_filters.empty()) {
+		auto filter_result = ConvertFilterPushdownToSQL(filter_info);
+		result.cte_section = GenerateCTESectionFromRequirements(filter_result.required_ctes, table_id);
+		result.where_clause = filter_result.where_conditions;
 	}
 
-	auto filter_result = ConvertFilterPushdownToSQL(filter_info);
-	result.cte_section = GenerateCTESectionFromRequirements(filter_result.required_ctes, table_id);
-	result.where_clause = filter_result.where_conditions;
+	if (!filter_info.partition_filters.empty()) {
+		auto partition_clause = GeneratePartitionPruningSQL(filter_info.partition_filters, table_id);
+		if (!partition_clause.empty()) {
+			if (!result.where_clause.empty()) {
+				result.where_clause += " AND ";
+			}
+			result.where_clause += partition_clause;
+		}
+	}
 
 	return result;
 }
@@ -1308,7 +1365,7 @@ vector<DuckLakeFileListEntry> DuckLakeMetadataManager::GetFilesForTable(DuckLake
 	string where_clause;
 
 	// Generate CTE section and WHERE clause if we have filter pushdown info
-	if (filter_info && !filter_info->column_filters.empty()) {
+	if (filter_info && (!filter_info->column_filters.empty() || !filter_info->partition_filters.empty())) {
 		auto components = GenerateFilterPushdownComponents(*filter_info, table_id);
 		query = components.cte_section;
 		where_clause = components.where_clause;
@@ -1644,7 +1701,7 @@ DuckLakeMetadataManager::GetExtendedFilesForTable(DuckLakeTableEntry &table, Duc
 	string where_clause;
 
 	// Generate CTE section and WHERE clause if we have filter pushdown info
-	if (filter_info && !filter_info->column_filters.empty()) {
+	if (filter_info && (!filter_info->column_filters.empty() || !filter_info->partition_filters.empty())) {
 		auto components = GenerateFilterPushdownComponents(*filter_info, table_id);
 		query = components.cte_section;
 		where_clause = components.where_clause;
