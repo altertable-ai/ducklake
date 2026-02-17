@@ -2024,15 +2024,6 @@ string DuckLakeMetadataManager::GetColumnType(const DuckLakeColumnInfo &col) {
 	}
 }
 
-static bool HasInlinedSystemColumnConflict(const vector<DuckLakeColumnInfo> &columns) {
-	for (auto &col : columns) {
-		if (DuckLakeUtil::IsInlinedSystemColumn(col.name)) {
-			return true;
-		}
-	}
-	return false;
-}
-
 string DuckLakeMetadataManager::GetInlinedTableQuery(const DuckLakeTableInfo &table, const string &table_name) {
 	string columns;
 
@@ -2122,7 +2113,7 @@ string DuckLakeMetadataManager::WriteNewInlinedTables(DuckLakeSnapshot commit_sn
 			}
 		}
 		// FIXME: we are skipping columns that have conflicting names, we should resolve this
-		if (HasInlinedSystemColumnConflict(table_with_columns.columns)) {
+		if (DuckLakeUtil::HasInlinedSystemColumnConflict(table_with_columns.columns)) {
 			continue;
 		}
 		GetInlinedTableQueries(commit_snapshot, table_with_columns, inlined_tables, inlined_table_queries);

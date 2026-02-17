@@ -181,6 +181,26 @@ bool DuckLakeInlinedDataReader::TryInitializeScan(ClientContext &context, Global
 	return true;
 }
 
+bool DuckLakeInlinedDataReader::TryEvaluateExpression(ClientContext &context, idx_t virtual_col_idx,
+                                                      Vector &input_vector, const LogicalType &input_type,
+                                                      Vector &output_vector) {
+	if (expression_map.empty() || virtual_col_idx >= column_ids.size()) {
+		return false;
+	}
+	auto local_id = column_ids[MultiFileLocalIndex(virtual_col_idx)];
+	auto expr_it = expression_executors.find(local_id);
+	if (expr_it == expression_executors.end()) {
+		return false;
+	}
+	DataChunk expr_input;
+	expr_input.Initialize(Allocator::Get(context), {input_type});
+	expr_input.Reset();
+	expr_input.data[0].Reference(input_vector);
+	expr_input.SetCardinality(scan_chunk.size());
+	expr_it->second->ExecuteExpression(expr_input, output_vector);
+	return true;
+}
+
 AsyncResult DuckLakeInlinedDataReader::Scan(ClientContext &context, GlobalTableFunctionState &global_state,
                                             LocalTableFunctionState &local_state, DataChunk &chunk) {
 	if (!virtual_columns.empty()) {
@@ -191,20 +211,9 @@ AsyncResult DuckLakeInlinedDataReader::Scan(ClientContext &context, GlobalTableF
 			switch (virtual_columns[c]) {
 			case InlinedVirtualColumn::NONE: {
 				auto column_id = source_idx++;
-				// Check if this column has an expression to evaluate
-				if (!expression_map.empty() && c < column_ids.size()) {
-					auto local_id = column_ids[MultiFileLocalIndex(c)];
-					auto expr_it = expression_executors.find(local_id);
-					if (expr_it != expression_executors.end()) {
-						// Evaluate expressions
-						DataChunk expr_input;
-						expr_input.Initialize(Allocator::Get(context), {scan_chunk.data[column_id].GetType()});
-						expr_input.Reset();
-						expr_input.data[0].Reference(scan_chunk.data[column_id]);
-						expr_input.SetCardinality(scan_chunk.size());
-						expr_it->second->ExecuteExpression(expr_input, chunk.data[c]);
-						break;
-					}
+				if (TryEvaluateExpression(context, c, scan_chunk.data[column_id],
+				                          scan_chunk.data[column_id].GetType(), chunk.data[c])) {
+					break;
 				}
 				if (chunk.data[c].GetType() != scan_chunk.data[column_id].GetType()) {
 					// type was changed, we gotta cast the data
@@ -215,22 +224,14 @@ AsyncResult DuckLakeInlinedDataReader::Scan(ClientContext &context, GlobalTableF
 				break;
 			}
 			case InlinedVirtualColumn::COLUMN_ROW_ID: {
-				// Check if there's an expression to evaluate (e.g., row_id_start + file_row_number)
-				if (!expression_map.empty() && c < column_ids.size()) {
-					auto local_id = column_ids[MultiFileLocalIndex(c)];
-					auto expr_it = expression_executors.find(local_id);
-					if (expr_it != expression_executors.end()) {
-						DataChunk expr_input;
-						expr_input.Initialize(Allocator::Get(context), {LogicalType::BIGINT});
-						expr_input.Reset();
-						auto ordinal_data = FlatVector::GetData<int64_t>(expr_input.data[0]);
-						for (idx_t r = 0; r < scan_chunk.size(); r++) {
-							ordinal_data[r] = NumericCast<int64_t>(file_row_number + r);
-						}
-						expr_input.SetCardinality(scan_chunk.size());
-						expr_it->second->ExecuteExpression(expr_input, chunk.data[c]);
-						continue;
-					}
+				// Generate ordinal data for row IDs
+				Vector ordinal_vector(LogicalType::BIGINT);
+				auto ordinal_data = FlatVector::GetData<int64_t>(ordinal_vector);
+				for (idx_t r = 0; r < scan_chunk.size(); r++) {
+					ordinal_data[r] = NumericCast<int64_t>(file_row_number + r);
+				}
+				if (TryEvaluateExpression(context, c, ordinal_vector, LogicalType::BIGINT, chunk.data[c])) {
+					continue;
 				}
 				auto row_id_data = FlatVector::GetData<int64_t>(chunk.data[c]);
 				for (idx_t r = 0; r < scan_chunk.size(); r++) {

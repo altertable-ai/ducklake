@@ -39,6 +39,10 @@ public:
 	void AddVirtualColumn(column_t virtual_column_id) override;
 
 private:
+	bool TryEvaluateExpression(ClientContext &context, idx_t virtual_col_idx, Vector &input_vector,
+	                           const LogicalType &input_type, Vector &output_vector);
+
+
 	mutex lock;
 	DuckLakeFunctionInfo &read_info;
 	string table_name;

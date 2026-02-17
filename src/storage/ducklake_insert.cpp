@@ -26,15 +26,6 @@
 
 namespace duckdb {
 
-static bool HasInlinedSystemColumnConflict(const ColumnList &columns) {
-	for (auto &col : columns.Logical()) {
-		if (DuckLakeUtil::IsInlinedSystemColumn(col.Name())) {
-			return true;
-		}
-	}
-	return false;
-}
-
 DuckLakeInsert::DuckLakeInsert(PhysicalPlan &physical_plan, const vector<LogicalType> &types, DuckLakeTableEntry &table,
                                optional_idx partition_id, string encryption_key_p)
     : PhysicalOperator(physical_plan, PhysicalOperatorType::EXTENSION, types, 1), table(&table), schema(nullptr),
@@ -773,7 +764,7 @@ PhysicalOperator &DuckLakeCatalog::PlanInsert(ClientContext &context, PhysicalPl
 
 	idx_t data_inlining_row_limit = DataInliningRowLimit(ducklake_schema.GetSchemaId(), ducklake_table.GetTableId());
 	// FIXME: we are skipping columns that have conflicting names, we should resolve this
-	if (data_inlining_row_limit > 0 && !HasInlinedSystemColumnConflict(ducklake_table.GetColumns())) {
+	if (data_inlining_row_limit > 0 && !DuckLakeUtil::HasInlinedSystemColumnConflict(ducklake_table.GetColumns())) {
 		plan = planner.Make<DuckLakeInlineData>(*plan, data_inlining_row_limit);
 		inline_data = plan->Cast<DuckLakeInlineData>();
 	}
@@ -797,7 +788,7 @@ PhysicalOperator &DuckLakeCatalog::PlanCreateTableAs(ClientContext &context, Phy
 	reference<PhysicalOperator> root = plan;
 	optional_ptr<DuckLakeInlineData> inline_data;
 	idx_t data_inlining_row_limit = DataInliningRowLimit(duck_schema.GetSchemaId(), TableIndex());
-	if (data_inlining_row_limit > 0 && !HasInlinedSystemColumnConflict(columns)) {
+	if (data_inlining_row_limit > 0 && !DuckLakeUtil::HasInlinedSystemColumnConflict(columns)) {
 		root = planner.Make<DuckLakeInlineData>(root.get(), data_inlining_row_limit);
 		inline_data = root.get().Cast<DuckLakeInlineData>();
 	}

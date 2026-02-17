@@ -4,9 +4,11 @@
 #include "duckdb/parser/keyword_helper.hpp"
 #include "duckdb/common/file_system.hpp"
 #include "storage/ducklake_metadata_manager.hpp"
+#include "storage/ducklake_metadata_info.hpp"
 #include "duckdb/planner/filter/optional_filter.hpp"
 #include "duckdb/planner/filter/dynamic_filter.hpp"
 #include "duckdb/function/scalar/variant_utils.hpp"
+#include "duckdb/catalog/catalog_entry/table_catalog_entry.hpp"
 
 namespace duckdb {
 
@@ -200,33 +202,18 @@ string ToSQLString(DuckLakeMetadataManager &metadata_manager, const Value &value
 		}
 		return value.ToString();
 	}
-	case LogicalTypeId::LIST: {
+	case LogicalTypeId::LIST:
+	case LogicalTypeId::ARRAY: {
 		if (!metadata_manager.TypeIsNativelySupported(value.type())) {
 			// Stored as VARCHAR text - use ToString() which produces parseable format
 			return value.ToString();
 		}
+		auto &children = value.type().id() == LogicalTypeId::LIST ? ListValue::GetChildren(value)
+		                                                          : ArrayValue::GetChildren(value);
 		string ret = "[";
-		auto &list_values = ListValue::GetChildren(value);
-		for (idx_t i = 0; i < list_values.size(); i++) {
-			auto &child = list_values[i];
-			ret += ToSQLString(metadata_manager, child);
-			if (i < list_values.size() - 1) {
-				ret += ", ";
-			}
-		}
-		ret += "]";
-		return ret;
-	}
-	case LogicalTypeId::ARRAY: {
-		if (!metadata_manager.TypeIsNativelySupported(value.type())) {
-			return value.ToString();
-		}
-		string ret = "[";
-		auto &array_values = ArrayValue::GetChildren(value);
-		for (idx_t i = 0; i < array_values.size(); i++) {
-			auto &child = array_values[i];
-			ret += ToSQLString(metadata_manager, child);
-			if (i < array_values.size() - 1) {
+		for (idx_t i = 0; i < children.size(); i++) {
+			ret += ToSQLString(metadata_manager, children[i]);
+			if (i < children.size() - 1) {
 				ret += ", ";
 			}
 		}
@@ -306,35 +293,6 @@ string DuckLakeUtil::ValueToSQL(DuckLakeMetadataManager &metadata_manager, Clien
 		result = ToSQLString(metadata_manager, val);
 		break;
 	}
-	case LogicalTypeId::MAP: {
-		if (metadata_manager.TypeIsNativelySupported(val.type())) {
-			string ret = "MAP(";
-			auto &map_values = MapValue::GetChildren(val);
-			// keys
-			ret += "[";
-			for (idx_t i = 0; i < map_values.size(); i++) {
-				if (i > 0) {
-					ret += ", ";
-				}
-				auto &map_children = StructValue::GetChildren(map_values[i]);
-				ret += ToSQLString(metadata_manager, map_children[0]);
-			}
-			ret += "], [";
-			// values
-			for (idx_t i = 0; i < map_values.size(); i++) {
-				if (i > 0) {
-					ret += ", ";
-				}
-				auto &map_children = StructValue::GetChildren(map_values[i]);
-				ret += ToSQLString(metadata_manager, map_children[1]);
-			}
-			ret += "])";
-			result = ret;
-		} else {
-			result = ToSQLString(metadata_manager, val);
-		}
-		break;
-	}
 	default:
 		result = ToSQLString(metadata_manager, val);
 	}
@@ -370,6 +328,24 @@ DynamicFilter *DuckLakeUtil::GetOptionalDynamicFilter(const TableFilter &filter)
 
 bool DuckLakeUtil::IsInlinedSystemColumn(const string &name) {
 	return name == "row_id" || name == "begin_snapshot" || name == "end_snapshot";
+}
+
+bool DuckLakeUtil::HasInlinedSystemColumnConflict(const ColumnList &columns) {
+	for (auto &col : columns.Logical()) {
+		if (IsInlinedSystemColumn(col.Name())) {
+			return true;
+		}
+	}
+	return false;
+}
+
+bool DuckLakeUtil::HasInlinedSystemColumnConflict(const vector<DuckLakeColumnInfo> &columns) {
+	for (auto &col : columns) {
+		if (IsInlinedSystemColumn(col.name)) {
+			return true;
+		}
+	}
+	return false;
 }
 
 } // namespace duckdb

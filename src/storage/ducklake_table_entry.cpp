@@ -951,6 +951,23 @@ unique_ptr<CatalogEntry> DuckLakeTableEntry::AlterTable(DuckLakeTransaction &tra
 	return std::move(new_entry);
 }
 
+static void ExtractDefaultValue(const DuckLakeColumnData &col_data, DuckLakeColumnInfo &info) {
+	info.initial_default = col_data.initial_default;
+	if (col_data.default_value) {
+		if (col_data.default_value->type == ExpressionType::VALUE_CONSTANT) {
+			auto &constant_value = col_data.default_value->Cast<ConstantExpression>();
+			info.default_value = constant_value.value;
+			info.default_value_type = "literal";
+		} else {
+			info.default_value = col_data.default_value->ToString();
+			info.default_value_type = "expression";
+		}
+	} else {
+		info.default_value = Value(LogicalTypeId::VARCHAR);
+		info.default_value_type = "literal";
+	}
+}
+
 void AddNewColumns(const DuckLakeFieldId &field_id, vector<DuckLakeNewColumn> &new_fields, FieldIndex parent_idx) {
 	auto &col_data = field_id.GetColumnData();
 
@@ -959,22 +976,7 @@ void AddNewColumns(const DuckLakeFieldId &field_id, vector<DuckLakeNewColumn> &n
 	new_col.column_info.name = field_id.Name();
 	new_col.column_info.type = DuckLakeTypes::ToString(field_id.Type());
 
-	new_col.column_info.initial_default = col_data.initial_default;
-
-	if (col_data.default_value) {
-		if (col_data.default_value->type == ExpressionType::VALUE_CONSTANT) {
-			// We extract the value directly
-			auto &constant_value = col_data.default_value->Cast<ConstantExpression>();
-			new_col.column_info.default_value = constant_value.value;
-			new_col.column_info.default_value_type = "literal";
-		} else {
-			new_col.column_info.default_value = col_data.default_value->ToString();
-			new_col.column_info.default_value_type = "expression";
-		}
-	} else {
-		new_col.column_info.default_value = Value(LogicalTypeId::VARCHAR);
-		new_col.column_info.default_value_type = "literal";
-	}
+	ExtractDefaultValue(col_data, new_col.column_info);
 	new_col.parent_idx = parent_idx.index;
 	new_fields.push_back(std::move(new_col));
 	for (auto &child : field_id.Children()) {
@@ -1266,22 +1268,7 @@ DuckLakeColumnInfo DuckLakeTableEntry::GetColumnInfo(FieldIndex field_index) con
 	result.id = field_index;
 	result.name = col.Name();
 	result.type = DuckLakeTypes::ToString(col.Type());
-	result.initial_default = col_data.initial_default;
-
-	if (col_data.default_value) {
-		if (col_data.default_value->type == ExpressionType::VALUE_CONSTANT) {
-			// We extract the value directly
-			auto &constant_value = col_data.default_value->Cast<ConstantExpression>();
-			result.default_value = constant_value.value;
-			result.default_value_type = "literal";
-		} else {
-			result.default_value = col_data.default_value->ToString();
-			result.default_value_type = "expression";
-		}
-	} else {
-		result.default_value = Value(LogicalTypeId::VARCHAR);
-		result.default_value_type = "literal";
-	}
+	ExtractDefaultValue(col_data, result);
 	result.nulls_allowed = GetNotNullFields().count(col.Name()) == 0;
 	return result;
 }
@@ -1322,21 +1309,7 @@ DuckLakeColumnInfo DuckLakeTableEntry::ConvertColumn(const string &name, const L
 	}
 	default: {
 		auto &column_data = field_id.GetColumnData();
-
-		column_entry.initial_default = column_data.initial_default;
-		if (column_data.default_value) {
-			if (column_data.default_value->type == ExpressionType::VALUE_CONSTANT) {
-				// We extract value directly
-				column_entry.default_value = column_data.default_value->Cast<ConstantExpression>().value;
-				column_entry.default_value_type = "literal";
-			} else {
-				column_entry.default_value = column_data.default_value->ToString();
-				column_entry.default_value_type = "expression";
-			}
-		} else {
-			column_entry.default_value = Value(LogicalTypeId::VARCHAR);
-			column_entry.default_value_type = "literal";
-		}
+		ExtractDefaultValue(column_data, column_entry);
 		break;
 	}
 	}
