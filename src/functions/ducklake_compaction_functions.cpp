@@ -305,6 +305,9 @@ void DuckLakeCompactor::GenerateCompactions(DuckLakeTableEntry &table,
 				break;
 			}
 		}
+		if (compacted_files >= options.max_files) {
+			break;
+		}
 	}
 }
 
