@@ -23,6 +23,9 @@ static unique_ptr<FunctionData> DuckLakeTableInfoBind(ClientContext &context, Ta
 		row_values.push_back(Value::BIGINT(NumericCast<int64_t>(table_info.file_size_bytes)));
 		row_values.push_back(Value::BIGINT(NumericCast<int64_t>(table_info.delete_file_count)));
 		row_values.push_back(Value::BIGINT(NumericCast<int64_t>(table_info.delete_file_size_bytes)));
+		row_values.push_back(Value(table_info.schema_name));
+		row_values.push_back(Value::BIGINT(NumericCast<int64_t>(table_info.record_count)));
+		row_values.push_back(Value::BIGINT(NumericCast<int64_t>(table_info.delete_file_record_count)));
 		result->rows.push_back(std::move(row_values));
 	}
 
@@ -48,6 +51,15 @@ static unique_ptr<FunctionData> DuckLakeTableInfoBind(ClientContext &context, Ta
 	return_types.emplace_back(LogicalType::BIGINT);
 
 	names.emplace_back("delete_file_size_bytes");
+	return_types.emplace_back(LogicalType::BIGINT);
+
+	names.emplace_back("schema_name");
+	return_types.emplace_back(LogicalType::VARCHAR);
+
+	names.emplace_back("record_count");
+	return_types.emplace_back(LogicalType::BIGINT);
+
+	names.emplace_back("delete_file_record_count");
 	return_types.emplace_back(LogicalType::BIGINT);
 	return std::move(result);
 }

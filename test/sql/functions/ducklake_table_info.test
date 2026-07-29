@@ -26,3 +26,86 @@ query IIIIIII
 SELECT table_name, schema_id, table_id, file_count, file_size_bytes > 0, delete_file_count, delete_file_size_bytes > 0 FROM ducklake.table_info();
 ----
 test	0	1	1	true	1	true
+
+# record_count counts the rows written into the visible data files, delete_file_record_count the
+# rows the visible delete files mark deleted
+query III
+SELECT schema_name, record_count, delete_file_record_count FROM ducklake.table_info();
+----
+main	1000	500
+
+# a table in a non-default schema reports that schema's name
+statement ok
+CREATE SCHEMA ducklake.s1
+
+statement ok
+CREATE TABLE ducklake.s1.other(i INTEGER)
+
+statement ok
+INSERT INTO ducklake.s1.other FROM range(100)
+
+query IIII
+SELECT schema_name, file_count, record_count, delete_file_record_count FROM ducklake.table_info() WHERE table_name = 'other';
+----
+s1	1	100	0
+
+# a table with no data at all reports zeroes rather than NULLs
+statement ok
+CREATE TABLE ducklake.empty_tbl(i INTEGER)
+
+query III
+SELECT file_count, record_count, delete_file_record_count FROM ducklake.table_info() WHERE table_name = 'empty_tbl';
+----
+0	0	0
+
+# deleting every row ends the data file, so its delete file stops being visible with it.
+# delete_file_record_count must drop too, otherwise it reports deletions against no data at all.
+statement ok
+DELETE FROM ducklake.s1.other
+
+query IIII
+SELECT file_count, delete_file_count, record_count, delete_file_record_count FROM ducklake.table_info() WHERE table_name = 'other';
+----
+0	0	0	0
+
+query I
+SELECT count(*) FROM ducklake.s1.other;
+----
+0
+
+# Both counts describe files only. The inlining limit is pinned on these attaches so the two cases
+# below hold whatever ducklake_default_data_inlining_row_limit the surrounding test config sets.
+
+# a delete small enough to be inlined never becomes a delete file, so delete_file_record_count does
+# not see it, while record_count keeps reporting the data file's rows as written
+statement ok
+ATTACH 'ducklake:{TEST_DIR}/{UUID}_inl.db' AS dl_inl (DATA_PATH '{DATA_PATH}/ducklake_table_info_inl', DATA_INLINING_ROW_LIMIT 10)
+
+statement ok
+CREATE TABLE dl_inl.inlined_del(i INTEGER)
+
+statement ok
+INSERT INTO dl_inl.inlined_del FROM range(100)
+
+statement ok
+DELETE FROM dl_inl.inlined_del WHERE i < 10
+
+query IIII
+SELECT file_count, record_count, delete_file_record_count, (SELECT count(*) FROM dl_inl.inlined_del) FROM dl_inl.table_info() WHERE table_name = 'inlined_del';
+----
+1	100	0	90
+
+# rows still held in an inlined data table have no data file behind them yet, so record_count is 0
+statement ok
+ATTACH 'ducklake:{TEST_DIR}/{UUID}_inlonly.db' AS dl_inlonly (DATA_PATH '{DATA_PATH}/ducklake_table_info_inlonly', DATA_INLINING_ROW_LIMIT 100)
+
+statement ok
+CREATE TABLE dl_inlonly.only_inlined(i INTEGER)
+
+statement ok
+INSERT INTO dl_inlonly.only_inlined FROM range(50)
+
+query IIII
+SELECT file_count, record_count, delete_file_record_count, (SELECT count(*) FROM dl_inlonly.only_inlined) FROM dl_inlonly.table_info() WHERE table_name = 'only_inlined';
+----
+0	0	0	50

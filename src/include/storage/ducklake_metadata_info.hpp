@@ -523,10 +523,16 @@ struct DuckLakeTableSizeInfo {
 	TableIndex table_id;
 	string table_name;
 	string table_uuid;
+	string schema_name;
 	idx_t file_size_bytes = 0;
 	idx_t delete_file_size_bytes = 0;
 	idx_t file_count = 0;
 	idx_t delete_file_count = 0;
+	//! Rows written across the visible data files, before any deletions are applied
+	idx_t record_count = 0;
+	//! Rows marked deleted by the visible delete files. Deletions held in inlined deletion tables
+	//! are not delete files and are therefore not counted here.
+	idx_t delete_file_record_count = 0;
 };
 
 struct DuckLakePath {

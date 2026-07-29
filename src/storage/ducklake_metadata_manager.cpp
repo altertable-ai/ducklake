@@ -5518,17 +5518,34 @@ SELECT
 	data_file_info.file_count AS data_file_count,
 	data_file_info.total_file_size AS data_total_size,
 	delete_file_info.file_count AS delete_file_count,
-	delete_file_info.total_file_size AS delete_total_size
+	delete_file_info.total_file_size AS delete_total_size,
+	(
+		SELECT schema_name
+		FROM {METADATA_CATALOG}.ducklake_schema sch
+		WHERE sch.schema_id = tbl.schema_id
+		  AND {SNAPSHOT_ID} >= sch.begin_snapshot AND ({SNAPSHOT_ID} < sch.end_snapshot OR sch.end_snapshot IS NULL)
+	) AS schema_name,
+	data_file_info.total_records AS record_count,
+	delete_file_info.total_deletes AS delete_file_record_count
 FROM {METADATA_CATALOG}.ducklake_table tbl, LATERAL (
-	SELECT COUNT(*) file_count, SUM(file_size_bytes) total_file_size
+	SELECT COUNT(*) file_count, SUM(df.file_size_bytes) total_file_size, SUM(df.record_count) total_records
 	FROM {METADATA_CATALOG}.ducklake_data_file df
-	WHERE df.table_id = tbl.table_id AND {SNAPSHOT_ID} >= begin_snapshot AND ({SNAPSHOT_ID} < end_snapshot OR end_snapshot IS NULL)
+	WHERE df.table_id = tbl.table_id
+	  AND {SNAPSHOT_ID} >= df.begin_snapshot AND ({SNAPSHOT_ID} < df.end_snapshot OR df.end_snapshot IS NULL)
 ) data_file_info, LATERAL (
-	SELECT COUNT(*) file_count, SUM(file_size_bytes) total_file_size
+	SELECT COUNT(*) file_count, SUM(df.file_size_bytes) total_file_size, SUM(df.delete_count) total_deletes
 	FROM {METADATA_CATALOG}.ducklake_delete_file df
-	WHERE df.table_id = tbl.table_id AND {SNAPSHOT_ID} >= begin_snapshot AND ({SNAPSHOT_ID} < end_snapshot OR end_snapshot IS NULL)
+	WHERE df.table_id = tbl.table_id
+	  AND {SNAPSHOT_ID} >= df.begin_snapshot AND ({SNAPSHOT_ID} < df.end_snapshot OR df.end_snapshot IS NULL)
+	  -- a delete file only counts while the data file it points at is still visible
+	  AND EXISTS (
+		SELECT 1
+		FROM {METADATA_CATALOG}.ducklake_data_file data
+		WHERE data.data_file_id = df.data_file_id
+		  AND {SNAPSHOT_ID} >= data.begin_snapshot AND ({SNAPSHOT_ID} < data.end_snapshot OR data.end_snapshot IS NULL)
+	)
 ) delete_file_info
-WHERE {SNAPSHOT_ID} >= begin_snapshot AND ({SNAPSHOT_ID} < end_snapshot OR end_snapshot IS NULL)
+WHERE {SNAPSHOT_ID} >= tbl.begin_snapshot AND ({SNAPSHOT_ID} < tbl.end_snapshot OR tbl.end_snapshot IS NULL)
 )");
 	for (auto &row : *result) {
 		DuckLakeTableSizeInfo table_size;
@@ -5547,6 +5564,15 @@ WHERE {SNAPSHOT_ID} >= begin_snapshot AND ({SNAPSHOT_ID} < end_snapshot OR end_s
 		}
 		if (!row.IsNull(7)) {
 			table_size.delete_file_size_bytes = row.GetValue<idx_t>(7);
+		}
+		if (!row.IsNull(8)) {
+			table_size.schema_name = row.GetValue<string>(8);
+		}
+		if (!row.IsNull(9)) {
+			table_size.record_count = row.GetValue<idx_t>(9);
+		}
+		if (!row.IsNull(10)) {
+			table_size.delete_file_record_count = row.GetValue<idx_t>(10);
 		}
 		table_sizes.push_back(std::move(table_size));
 	}
