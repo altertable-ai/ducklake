@@ -2130,12 +2130,13 @@ LEFT JOIN (
 LEFT JOIN (
    SELECT data_file_id, ARRAY_AGG(partition_value ORDER BY partition_key_index) keys
    FROM {METADATA_CATALOG}.ducklake_file_partition_value
+   WHERE table_id=%d
    GROUP BY data_file_id
 ) partition_info USING (data_file_id)
 WHERE data.table_id=%d %s%s
 ORDER BY data.begin_snapshot, data.row_id_start, data.data_file_id, del.begin_snapshot
 		)",
-	                                table_id.index, select_list, table_id.index, table_id.index,
+	                                table_id.index, select_list, table_id.index, table_id.index, table_id.index,
 	                                deletion_threshold_clause, file_size_filter_clause);
 	auto result = transaction.Query(query);
 	if (result->HasError()) {
@@ -2225,8 +2226,10 @@ ORDER BY data.begin_snapshot, data.row_id_start, data.data_file_id, del.begin_sn
 	}
 
 	if (type == CompactionType::REWRITE_DELETES) {
-		for (idx_t file_idx = 0; file_idx < files.size(); file_idx++) {
-			auto &file = files[file_idx];
+		// Drop the files that are not deleted enough to be worth rewriting. Erasing them one at a
+		// time is O(n) per file and so O(n^2) for a table whose files mostly fall below the
+		// threshold, which is the common case.
+		auto not_worth_rewriting = [&deletion_threshold](const DuckLakeCompactionFileEntry &file) {
 			idx_t active_delete_count = 0;
 			if (!file.delete_files.empty() && !file.delete_files.back().end_snapshot.IsValid()) {
 				active_delete_count = file.delete_files.back().row_count;
@@ -2236,11 +2239,9 @@ ORDER BY data.begin_snapshot, data.row_id_start, data.data_file_id, del.begin_sn
 			if (file.file.row_count > 0) {
 				delete_ratio = static_cast<double>(total_delete_count) / static_cast<double>(file.file.row_count);
 			}
-			if (total_delete_count == 0 || delete_ratio < deletion_threshold) {
-				files.erase_at(file_idx);
-				file_idx--;
-			}
-		}
+			return total_delete_count == 0 || delete_ratio < deletion_threshold;
+		};
+		files.erase(std::remove_if(files.begin(), files.end(), not_worth_rewriting), files.end());
 	}
 
 	return files;
@@ -3088,7 +3089,7 @@ ORDER BY row_id, begin_snapshot;)",
 }
 
 string DuckLakeMetadataManager::ReadInlinedDataAggregatesSql(const string &inlined_table_name,
-                                                              const string &select_list) {
+                                                             const string &select_list) {
 	return StringUtil::Format(R"(
 SELECT %s
 FROM {METADATA_CATALOG}.%s

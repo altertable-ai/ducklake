@@ -1,0 +1,84 @@
+# name: test/sql/rewrite_data_files/test_rewrite_threshold_filtering.test
+# description: Only files whose delete ratio reaches the threshold are rewritten, whatever their position in the file list
+# group: [rewrite_data_files]
+
+require ducklake
+
+require parquet
+
+test-env DUCKLAKE_CONNECTION __TEST_DIR__/{UUID}.db
+
+test-env DATA_PATH __TEST_DIR__
+
+
+statement ok
+ATTACH 'ducklake:${DUCKLAKE_CONNECTION}' AS ducklake (DATA_PATH '${DATA_PATH}/rewrite_threshold_filtering', METADATA_CATALOG 'ducklake_metadata', DATA_INLINING_ROW_LIMIT 0)
+
+statement ok
+USE ducklake
+
+# one data file per partition, 100 rows each
+statement ok
+CREATE TABLE t(i INTEGER, p INTEGER)
+
+statement ok
+ALTER TABLE t SET PARTITIONED BY (p)
+
+statement ok
+INSERT INTO t SELECT r, r//100 FROM range(400) t(r)
+
+query I
+SELECT count(*) FROM ducklake_metadata.ducklake_data_file WHERE end_snapshot IS NULL
+----
+4
+
+# give each file a different delete ratio: 50%, 20%, 5%, and none at all
+statement ok
+DELETE FROM t WHERE p = 0 AND i % 2 = 0
+
+statement ok
+DELETE FROM t WHERE p = 1 AND i % 5 = 0
+
+statement ok
+DELETE FROM t WHERE p = 2 AND i % 20 = 0
+
+# a threshold above every ratio rewrites nothing, so no rows come back at all
+query I
+SELECT count(*) FROM ducklake_rewrite_data_files('ducklake', 't', delete_threshold => 0.9)
+----
+0
+
+# 0.3 admits only the 50% file, and the qualifying file is not the last one in the list
+query III
+SELECT table_name, files_processed, files_created FROM ducklake_rewrite_data_files('ducklake', 't', delete_threshold => 0.3) ORDER BY ALL
+----
+t	1	1
+
+# 0.1 admits the remaining 20% file
+query III
+SELECT table_name, files_processed, files_created FROM ducklake_rewrite_data_files('ducklake', 't', delete_threshold => 0.1) ORDER BY ALL
+----
+t	1	1
+
+# 0.01 admits the 5% file, leaving only the file that has no deletes at all
+query III
+SELECT table_name, files_processed, files_created FROM ducklake_rewrite_data_files('ducklake', 't', delete_threshold => 0.01) ORDER BY ALL
+----
+t	1	1
+
+# everything worth rewriting has been rewritten, so a repeat call is a no-op
+query I
+SELECT count(*) FROM ducklake_rewrite_data_files('ducklake', 't', delete_threshold => 0.01)
+----
+0
+
+# rewriting must not change what the table contains
+query I
+SELECT count(*) FROM t
+----
+325
+
+query I
+SELECT sum(i) FROM t
+----
+73200
